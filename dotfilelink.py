@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
+import glob
 import argparse
 import hashlib
 import shutil
@@ -227,11 +228,17 @@ class CreateAction(Action):
             "required": False,
             "default": False,
         },
+        "dest_type": {
+            "type": str,
+            "choices": ["normal", "glob_single"],
+            "required": False,
+            "default": "normal",
+        },
     })
 
     def execute(self) -> Tuple[str, Print.ANSI_COLOR]:
         source_path = self._source_path()
-        dest_path = self._absolute_path(self._parsed_args['dest'])
+        dest_path = self._dest_path()
         Print.v(f"Creating {self._parsed_args['type']} of {source_path} "
                 f"at {self._parsed_args['dest']}")
         if self._parsed_args['type'] == "link":
@@ -395,17 +402,23 @@ class CreateAction(Action):
     @staticmethod
     def _absolute_path(path: str) -> str:
         """
-        Return the given path as absolute path with expanded homedir and
-        environment variables.
+        Return the given path as absolute path.
         """
-        expanded_path = os.path.expanduser(os.path.expandvars(path))
-        return os.path.normpath(os.path.join(LOCAL_DIR, expanded_path))
+        return os.path.normpath(os.path.join(LOCAL_DIR, path))
+
+    @staticmethod
+    def _expanded_path(path: str) -> str:
+        """
+        Return the given path as with expanded homedir and environment
+        variables.
+        """
+        return os.path.expanduser(os.path.expandvars(path))
 
     def _source_path(self) -> str:
         """
         Ensure that the source file exists and return its absolute path.
         """
-        source_path = self._absolute_path(self._parsed_args['src'])
+        source_path = self._absolute_path(self._expanded_path(self._parsed_args['src']))
         if not os.path.isfile(source_path):
             source_path_text = (
                 repr(self._parsed_args['src'])
@@ -413,6 +426,30 @@ class CreateAction(Action):
             )
             raise self.SourceDoesNotExist(f"Source file {source_path_text} not found.")
         return source_path
+
+    def _dest_path(self) -> str:
+        expanded_path = self._expanded_path(self._parsed_args["dest"])
+        if self._parsed_args["dest_type"] == "normal":
+            return self._absolute_path(expanded_path)
+        if self._parsed_args["dest_type"] == "glob_single":
+            if set(os.path.basename(expanded_path)) & set("*?[]"):
+                raise self.CreateActionError(f"Glob patterns are not yet supported in the file "
+                                             f"name: {self._parsed_args['dest']!r}")
+            dest_dir_pattern = os.path.dirname(expanded_path)
+            dest_dir_list = glob.glob(dest_dir_pattern)
+            if len(dest_dir_list) == 0:
+                raise self.CreateActionError(
+                    f"No directory matched glob pattern: {dest_dir_pattern!r} "
+                    f"(dest: {self._parsed_args['dest']!r})"
+                )
+            if len(dest_dir_list) > 1:
+                raise self.CreateActionError(
+                    f"Multiple matches for dest_type='glob_single': {dest_dir_list!r} "
+                    f"(dest: {self._parsed_args['dest']!r})"
+                )
+            dest_path = os.path.join(dest_dir_list[0], os.path.basename(expanded_path))
+            return self._absolute_path(dest_path)
+        raise RuntimeError("Unreachable")
 
 
 ACTIONS_MAP: Dict[str, Type[Action]] = {
