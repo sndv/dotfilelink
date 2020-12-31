@@ -159,10 +159,11 @@ class Action:
     class SourceDoesNotExist(ActionError):
         pass
 
-    def __init__(self, args: Dict[str, Any], dry_run: bool = False):
+    def __init__(self, args: Dict[str, Any], local_dir: str, dry_run: bool = False):
         if not self.args_definition:
             raise NotImplementedError("Abstract class")
         self.sudo: bool = args.pop("sudo", False)
+        self.local_dir = local_dir
         self.dry_run = dry_run
         self._parsed_args = self.args_definition.parse(args)
 
@@ -399,12 +400,11 @@ class CreateAction(Action):
         self._create_with_dir(source_path, dest_path, self._create_copy)
         return self.Result.NEW_FILE_CREATED
 
-    @staticmethod
-    def _absolute_path(path: str) -> str:
+    def _absolute_path(self, path: str) -> str:
         """
         Return the given path as absolute path.
         """
-        return os.path.normpath(os.path.join(LOCAL_DIR, path))
+        return os.path.normpath(os.path.join(self.local_dir, path))
 
     @staticmethod
     def _expanded_path(path: str) -> str:
@@ -480,7 +480,7 @@ def parse_yaml_file(fh: IO[str]) -> Any:
     return result
 
 
-def _parse_configuraiton(config: Any, dry_run: bool = False) -> List[Action]:
+def _parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False) -> List[Action]:
     if not isinstance(config, list):
         raise ConfigFileError("Invalid configuraiton file format: expected list of actions")
     actions: List[Action] = []
@@ -491,15 +491,15 @@ def _parse_configuraiton(config: Any, dry_run: bool = False) -> List[Action]:
         if action_name not in ACTIONS_MAP:
             raise ConfigFileError(f"Invalid action: {action_name}")
         for action_args in action_args_list:
-            action = ACTIONS_MAP[action_name](action_args, dry_run=dry_run)
+            action = ACTIONS_MAP[action_name](action_args, local_dir=local_dir, dry_run=dry_run)
             actions.append(action)
 
     return actions
 
 
-def parse_configuraiton(config: Any, dry_run: bool = False) -> List[Action]:
+def parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False) -> List[Action]:
     try:
-        return _parse_configuraiton(config, dry_run=dry_run)
+        return _parse_configuraiton(config, local_dir, dry_run=dry_run)
     except (ConfigFileError, ArgsDefinition.InvalidArguments) as e:
         Print.failure(f"Configuration file error: {e}")
         sys.exit(1)
@@ -545,7 +545,10 @@ def main() -> None:
         sys.exit(1)
 
     config = parse_yaml_file(args.config_file)
-    actions = parse_configuraiton(config, dry_run=args.dry_run)
+    # Use the configuration file local directory when resolving paths
+    config_local_dir = os.path.dirname(os.path.normpath(os.path.join(LOCAL_DIR,
+                                                                     args.config_file.name)))
+    actions = parse_configuraiton(config, local_dir=config_local_dir, dry_run=args.dry_run)
     non_sudo_actions = [action for action in actions if not action.sudo]
     sudo_actions = [action for action in actions if action.sudo]
 
