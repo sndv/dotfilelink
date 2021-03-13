@@ -15,7 +15,7 @@ from typing import List, Dict, Tuple, IO, Any, Optional, Callable, Type
 import yaml
 
 
-LOCAL_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_DOTFILE_CONFIG = "~/dotfiles/config.yml"
 
 class Print:
 
@@ -460,8 +460,7 @@ ACTIONS_MAP: Dict[str, Type[Action]] = {
 def parse_args(args_list: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sudo-only", action="store_true")
-    parser.add_argument("--config-file", nargs="?",
-                        default=os.path.join(LOCAL_DIR, "dotfile_config.yml"),
+    parser.add_argument("--config-file", nargs="?", default=DEFAULT_DOTFILE_CONFIG,
                         type=argparse.FileType("r"))
     parser.add_argument("--verbose", "-v", action="count", default=0)
     parser.add_argument("--color", default="auto", choices=["always", "auto", "never"])
@@ -546,8 +545,7 @@ def main() -> None:
 
     config = parse_yaml_file(args.config_file)
     # Use the configuration file local directory when resolving paths
-    config_local_dir = os.path.dirname(os.path.normpath(os.path.join(LOCAL_DIR,
-                                                                     args.config_file.name)))
+    config_local_dir = os.path.dirname(os.path.abspath(args.config_file.name))
     actions = parse_configuraiton(config, local_dir=config_local_dir, dry_run=args.dry_run)
     non_sudo_actions = [action for action in actions if not action.sudo]
     sudo_actions = [action for action in actions if action.sudo]
