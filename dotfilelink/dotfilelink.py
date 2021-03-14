@@ -15,7 +15,7 @@ from typing import List, Dict, Tuple, IO, Any, Optional, Callable, Type
 import yaml
 
 
-DEFAULT_DOTFILE_CONFIG = "~/dotfiles/config.yml"
+DEFAULT_DOTFILE_CONFIG = os.path.expanduser("~/dotfiles/config.yml")
 
 class Print:
 
@@ -512,6 +512,8 @@ def execute_dotfilelink_with_sudo() -> int:
         "--color", colors,
         "--sudo-only",
     ]
+    if "--config-file" not in command:
+        command += ["--config-file", DEFAULT_DOTFILE_CONFIG]
     process = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert process.stdout is not None and process.stderr is not None
 
