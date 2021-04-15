@@ -297,7 +297,12 @@ class CreateAction(Action):
         if os.path.exists(dest_path):
             with open(dest_path, "r") as fd:
                 dest_lines = fd.read().splitlines(keepends=True)
-        return "".join(difflib.unified_diff(dest_lines, src_lines, dest_path, src_path))
+        diff = ""
+        for diff_line in difflib.unified_diff(dest_lines, src_lines, dest_path, src_path):
+            diff += diff_line
+            if not diff_line.endswith("\n"):
+                diff += "\n\\ No newline at end of file\n"
+        return diff
 
     def _can_replace(self) -> bool:
         return (
