@@ -161,13 +161,14 @@ class Action:
         pass
 
     def __init__(self, args: Dict[str, Any], local_dir: str, dry_run: bool = False,
-                 show_diff: bool = False):
+                 show_diff: bool = False, force: bool = False):
         if not self.args_definition:
             raise NotImplementedError("Abstract class")
         self.sudo: bool = args.pop("sudo", False)
         self.local_dir = local_dir
         self.dry_run = dry_run
         self.show_diff = show_diff
+        self.force = force
         self._parsed_args = self.args_definition.parse(args)
 
     def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
@@ -215,6 +216,11 @@ class CreateAction(Action):
         NORMAL = "normal"
         GLOB_SINGLE = "glob_single"
 
+    class ForceArg:
+        ALLOW = "allow"
+        ALWAYS = "always"
+        NEVER = "never"
+
     args_definition = ArgsDefinition({
         Args.TYPE: {
             "type": str,
@@ -231,14 +237,16 @@ class CreateAction(Action):
             "required": True,
         },
         Args.RELINK: {
-            "type": bool,
+            "type": str,
+            "choices": [ForceArg.ALLOW, ForceArg.ALWAYS, ForceArg.NEVER],
             "required": False,
-            "default": False,
+            "default": ForceArg.ALLOW,
         },
         Args.REPLACE: {
-            "type": bool,
+            "type": str,
+            "choices": [ForceArg.ALLOW, ForceArg.ALWAYS, ForceArg.NEVER],
             "required": False,
-            "default": False,
+            "default": ForceArg.ALLOW,
         },
         Args.BACKUP: {
             "type": bool,
@@ -291,6 +299,18 @@ class CreateAction(Action):
                 dest_lines = fd.read().splitlines(keepends=True)
         return "".join(difflib.unified_diff(dest_lines, src_lines, dest_path, src_path))
 
+    def _can_replace(self) -> bool:
+        return (
+            self._parsed_args[self.Args.REPLACE] == self.ForceArg.ALWAYS
+            or (self._parsed_args[self.Args.REPLACE] == self.ForceArg.ALLOW and self.force)
+        )
+
+    def _can_relink(self) -> bool:
+        return (
+            self._parsed_args[self.Args.RELINK] == self.ForceArg.ALWAYS
+            or (self._parsed_args[self.Args.RELINK] == self.ForceArg.ALLOW and self.force)
+        )
+
     def _create_link(self, source_path: str, dest_path: str) -> None:
         if self.dry_run:
             return
@@ -330,7 +350,7 @@ class CreateAction(Action):
             raise self.CreateActionError(f"Failed to remove link: {link_path!r}: {err!s}") from err
 
     def _relink(self, source_path: str, dest_path: str, current_source_path: str) -> None:
-        if not self._parsed_args[self.Args.RELINK]:
+        if not self._can_relink():
             raise self.CreateActionError(f"Link exists with wrong source: {current_source_path!r} "
                                          f"-> {dest_path!r} instead of {source_path!r}")
         Print.v("Relinking to correct source...")
@@ -340,7 +360,7 @@ class CreateAction(Action):
         self._create_link(source_path, dest_path)
 
     def _replace_link(self, source_path: str, dest_path: str) -> None:
-        if not self._parsed_args[self.Args.REPLACE]:
+        if not self._can_replace():
             raise self.CreateActionError(
                 f"Can't create copy, destination exists as link: {dest_path!r}"
             )
@@ -352,7 +372,7 @@ class CreateAction(Action):
 
     def _replace_file(self, source_path: str, dest_path: str,
                       create_fn: Callable[[str, str], None]) -> None:
-        if not self._parsed_args[self.Args.REPLACE]:
+        if not self._can_replace():
             raise self.CreateActionError(
                 f"Can't create link or copy, destination file exists: {dest_path!r}"
             )
@@ -509,6 +529,7 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
     parser.add_argument("--color", default="auto", choices=["always", "auto", "never"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--diff", action="store_true")
+    parser.add_argument("--force", action="store_true")
     args = parser.parse_args(args_list)
     return args
 
@@ -524,7 +545,7 @@ def parse_yaml_file(fh: IO[str]) -> Any:
 
 
 def _parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
-                         show_diff: bool = False) -> List[Action]:
+                         show_diff: bool = False, force: bool = False) -> List[Action]:
     if not isinstance(config, list):
         raise ConfigFileError("Invalid configuraiton file format: expected list of actions")
     actions: List[Action] = []
@@ -536,16 +557,17 @@ def _parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
             raise ConfigFileError(f"Invalid action: {action_name}")
         for action_args in action_args_list:
             action = ACTIONS_MAP[action_name](action_args, local_dir=local_dir, dry_run=dry_run,
-                                              show_diff=show_diff)
+                                              show_diff=show_diff, force=force)
             actions.append(action)
 
     return actions
 
 
 def parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
-                        show_diff: bool = False) -> List[Action]:
+                        show_diff: bool = False, force: bool = False) -> List[Action]:
     try:
-        return _parse_configuraiton(config, local_dir, dry_run=dry_run, show_diff=show_diff)
+        return _parse_configuraiton(config, local_dir, dry_run=dry_run, show_diff=show_diff,
+                                    force=force)
     except (ConfigFileError, ArgsDefinition.InvalidArguments) as e:
         Print.failure(f"Configuration file error: {e}")
         sys.exit(1)
@@ -596,7 +618,7 @@ def main() -> None:
     # Use the configuration file local directory when resolving paths
     config_local_dir = os.path.dirname(os.path.abspath(args.config_file.name))
     actions = parse_configuraiton(config, local_dir=config_local_dir, dry_run=args.dry_run,
-                                  show_diff=args.diff)
+                                  show_diff=args.diff, force=args.force)
     non_sudo_actions = [action for action in actions if not action.sudo]
     sudo_actions = [action for action in actions if action.sudo]
 
