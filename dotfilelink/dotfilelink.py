@@ -197,48 +197,89 @@ class CreateAction(Action):
         REPLACED_BROKEN_LINK_WITH_FILE = "Replaced broken link with file"
         REPLACED_FILE = "Replaced file"
 
+    class Args:
+        TYPE = "type"
+        SRC = "src"
+        DEST = "dest"
+        RELINK = "relink"
+        REPLACE = "replace"
+        BACKUP = "backup"
+        CREATE_DIRS = "create_dirs"
+        DEST_TYPE = "dest_type"
+
+    class TypeArg:
+        LINK = "link"
+        COPY = "copy"
+
+    class DestTypeArg:
+        NORMAL = "normal"
+        GLOB_SINGLE = "glob_single"
+
     args_definition = ArgsDefinition({
-        "type": {
+        Args.TYPE: {
             "type": str,
-            "choices": ["link", "copy"],
+            "choices": [TypeArg.LINK, TypeArg.COPY],
             "required": False,
-            "default": "link",
+            "default": TypeArg.LINK,
         },
-        "src": {
+        Args.SRC: {
             "type": str,
             "required": True,
         },
-        "dest": {
+        Args.DEST: {
             "type": str,
             "required": True,
         },
-        "relink": {
+        Args.RELINK: {
             "type": bool,
             "required": False,
             "default": False,
         },
-        "replace": {
+        Args.REPLACE: {
             "type": bool,
             "required": False,
             "default": False,
         },
-        "backup": {
+        Args.BACKUP: {
             "type": bool,
             "required": False,
             "default": True,
         },
-        "create_dirs": {
+        Args.CREATE_DIRS: {
             "type": bool,
             "required": False,
             "default": False,
         },
-        "dest_type": {
+        Args.DEST_TYPE: {
             "type": str,
-            "choices": ["normal", "glob_single"],
+            "choices": [DestTypeArg.NORMAL, DestTypeArg.GLOB_SINGLE],
             "required": False,
-            "default": "normal",
+            "default": DestTypeArg.NORMAL,
         },
     })
+
+    def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
+        source_path = self._source_path()
+        dest_path = self._dest_path()
+        Print.v(f"Creating {self._parsed_args[self.Args.TYPE]} of {source_path} "
+                f"at {self._parsed_args[self.Args.DEST]}")
+        if self._parsed_args[self.Args.TYPE] == self.TypeArg.LINK:
+            result, diff = self._execute_for_link(source_path, dest_path)
+        elif self._parsed_args[self.Args.TYPE] == self.TypeArg.COPY:
+            result, diff = self._execute_for_copy(source_path, dest_path)
+        else:
+            raise RuntimeError("Unreachable")
+        message = f"{result.value} {source_path!r} -> {dest_path!r}"
+        color = (Print.AS_EXPECTED_COLOR
+                 if result in [self.Result.LINK_AS_EXPECTED, self.Result.FILE_AS_EXPECTED]
+                 else Print.SUCCESS_COLOR)
+        return message, color, diff
+
+    def file_diff(self, src_path: str, dest_path: str) -> Optional[str]:
+        if self.show_diff:
+            Print.vv(f"Generating diff between {src_path!r} and {dest_path!r}.")
+            return self._file_diff(src_path, dest_path)
+        return None
 
     @staticmethod
     def _file_diff(src_path: str, dest_path: str) -> str:
@@ -249,29 +290,6 @@ class CreateAction(Action):
             with open(dest_path, "r") as fd:
                 dest_lines = fd.read().splitlines(keepends=True)
         return "".join(difflib.unified_diff(dest_lines, src_lines, dest_path, src_path))
-
-    def file_diff(self, src_path: str, dest_path: str) -> Optional[str]:
-        if self.show_diff:
-            Print.vv(f"Generating diff between {src_path!r} and {dest_path!r}.")
-            return self._file_diff(src_path, dest_path)
-        return None
-
-    def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
-        source_path = self._source_path()
-        dest_path = self._dest_path()
-        Print.v(f"Creating {self._parsed_args['type']} of {source_path} "
-                f"at {self._parsed_args['dest']}")
-        if self._parsed_args['type'] == "link":
-            result, diff = self._execute_for_link(source_path, dest_path)
-        elif self._parsed_args['type'] == "copy":
-            result, diff = self._execute_for_copy(source_path, dest_path)
-        else:
-            raise RuntimeError("Unreachable")
-        message = f"{result.value} {source_path!r} -> {dest_path!r}"
-        color = (Print.AS_EXPECTED_COLOR
-                 if result in [self.Result.LINK_AS_EXPECTED, self.Result.FILE_AS_EXPECTED]
-                 else Print.SUCCESS_COLOR)
-        return message, color, diff
 
     def _create_link(self, source_path: str, dest_path: str) -> None:
         if self.dry_run:
@@ -312,7 +330,7 @@ class CreateAction(Action):
             raise self.CreateActionError(f"Failed to remove link: {link_path!r}: {err!s}") from err
 
     def _relink(self, source_path: str, dest_path: str, current_source_path: str) -> None:
-        if not self._parsed_args["relink"]:
+        if not self._parsed_args[self.Args.RELINK]:
             raise self.CreateActionError(f"Link exists with wrong source: {current_source_path!r} "
                                          f"-> {dest_path!r} instead of {source_path!r}")
         Print.v("Relinking to correct source...")
@@ -322,7 +340,7 @@ class CreateAction(Action):
         self._create_link(source_path, dest_path)
 
     def _replace_link(self, source_path: str, dest_path: str) -> None:
-        if not self._parsed_args["replace"]:
+        if not self._parsed_args[self.Args.REPLACE]:
             raise self.CreateActionError(
                 f"Can't create copy, destination exists as link: {dest_path!r}"
             )
@@ -334,12 +352,12 @@ class CreateAction(Action):
 
     def _replace_file(self, source_path: str, dest_path: str,
                       create_fn: Callable[[str, str], None]) -> None:
-        if not self._parsed_args["replace"]:
+        if not self._parsed_args[self.Args.REPLACE]:
             raise self.CreateActionError(
                 f"Can't create link or copy, destination file exists: {dest_path!r}"
             )
         Print.v(f"Replacing file {dest_path!r}...")
-        if self._parsed_args["backup"]:
+        if self._parsed_args[self.Args.BACKUP]:
             self._backup_file(dest_path)
         elif not self.dry_run:
             # Backup will rename the file, so remove only if not backed up
@@ -355,7 +373,7 @@ class CreateAction(Action):
                          create_fn: Callable[[str, str], None]) -> None:
         dest_directory = os.path.dirname(dest_path)
         if not os.path.isdir(dest_directory):
-            if self._parsed_args["create_dirs"]:
+            if self._parsed_args[self.Args.CREATE_DIRS]:
                 self._create_dirs(dest_directory)
             else:
                 raise self.CreateActionError(f"Directory does not exist: {dest_path!r}")
@@ -443,34 +461,34 @@ class CreateAction(Action):
         """
         Ensure that the source file exists and return its absolute path.
         """
-        source_path = self._absolute_path(self._expanded_path(self._parsed_args['src']))
+        source_path = self._absolute_path(self._expanded_path(self._parsed_args[self.Args.SRC]))
         if not os.path.isfile(source_path):
             source_path_text = (
-                repr(self._parsed_args['src'])
-                + (f" ({source_path!r})" if self._parsed_args['src'] != source_path else "")
+                repr(self._parsed_args[self.Args.SRC])
+                + (f" ({source_path!r})" if self._parsed_args[self.Args.SRC] != source_path else "")
             )
             raise self.SourceDoesNotExist(f"Source file {source_path_text} not found.")
         return source_path
 
     def _dest_path(self) -> str:
-        expanded_path = self._expanded_path(self._parsed_args["dest"])
-        if self._parsed_args["dest_type"] == "normal":
+        expanded_path = self._expanded_path(self._parsed_args[self.Args.DEST])
+        if self._parsed_args[self.Args.DEST_TYPE] == self.DestTypeArg.NORMAL:
             return self._absolute_path(expanded_path)
-        if self._parsed_args["dest_type"] == "glob_single":
+        if self._parsed_args[self.Args.DEST_TYPE] == self.DestTypeArg.GLOB_SINGLE:
             if set(os.path.basename(expanded_path)) & set("*?[]"):
                 raise self.CreateActionError(f"Glob patterns are not yet supported in the file "
-                                             f"name: {self._parsed_args['dest']!r}")
+                                             f"name: {self._parsed_args[self.Args.DEST]!r}")
             dest_dir_pattern = os.path.dirname(expanded_path)
             dest_dir_list = glob.glob(dest_dir_pattern)
             if len(dest_dir_list) == 0:
                 raise self.CreateActionError(
                     f"No directory matched glob pattern: {dest_dir_pattern!r} "
-                    f"(dest: {self._parsed_args['dest']!r})"
+                    f"(dest: {self._parsed_args[self.Args.DEST]!r})"
                 )
             if len(dest_dir_list) > 1:
                 raise self.CreateActionError(
-                    f"Multiple matches for dest_type='glob_single': {dest_dir_list!r} "
-                    f"(dest: {self._parsed_args['dest']!r})"
+                    f"Multiple matches for {self.Args.DEST_TYPE}='{self.DestTypeArg.GLOB_SINGLE}': "
+                    "{dest_dir_list!r} (dest: {self._parsed_args[self.Args.DEST]!r})"
                 )
             dest_path = os.path.join(dest_dir_list[0], os.path.basename(expanded_path))
             return self._absolute_path(dest_path)
