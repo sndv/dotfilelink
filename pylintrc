@@ -14,4 +14,4 @@ good-names=i,j,k,ex,e,_,f,fh,fd,fp,v,vv
 
 [DESIGN]
 max-args=16
-min-public-methods=1
+min-public-methods=0
