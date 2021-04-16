@@ -1,10 +1,22 @@
+import os
+import re
+
 import setuptools
 
-VERSION = "0.2.0"
+
+def get_version() -> str:
+    init_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "dotfilelink/__init__.py")
+    with open(init_path, "r") as fh:
+        init_file = fh.read()
+    match = re.search(r"^__version__ = ['\"]([^'\"]*)['\"]", init_file, re.M)
+    if not match:
+        raise RuntimeError("Cannot find package version")
+    return match.group(1)
+
 
 setuptools.setup(
     name="dotfilelink",
-    version=VERSION,
+    version=get_version(),
     author="sndv",
     author_email="sndv@mailbox.org",
     description="A tool to link or copy dotfiles",

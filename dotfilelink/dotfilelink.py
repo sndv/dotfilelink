@@ -16,6 +16,8 @@ from typing import List, Dict, Tuple, IO, Any, Optional, Callable, Type
 
 import yaml
 
+from . import __version__
+
 
 DEFAULT_DOTFILE_CONFIG = os.path.expanduser("~/dotfiles/config.yml")
 
@@ -650,6 +652,7 @@ ACTIONS_MAP: Dict[str, Type[Action]] = {
 
 def parse_args(args_list: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--version", "-V", action="store_true")
     parser.add_argument("--sudo-only", action="store_true")
     parser.add_argument("--config-file", nargs="?", default=DEFAULT_DOTFILE_CONFIG,
                         type=argparse.FileType("r"))
@@ -736,6 +739,10 @@ def main() -> None:
         Print.COLORS_ENABLED = sys.stdout.isatty()
     else:
         Print.COLORS_ENABLED = False
+
+    if args.version:
+        Print.info(f"dotfilelink v{__version__}")
+        sys.exit(0)
 
     am_root = os.geteuid() == 0
     if args.sudo_only and not am_root:
