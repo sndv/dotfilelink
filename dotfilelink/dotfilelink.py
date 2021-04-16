@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import glob
+import re
 import argparse
 import hashlib
 import shutil
@@ -177,6 +178,51 @@ class Action:
         """
         raise NotImplementedError("Abstract method")
 
+    def _file_diff(self, src_path: str, dest_path: str) -> Optional[str]:
+        if not self.show_diff:
+            return None
+        Print.vv(f"Generating diff between {src_path!r} and {dest_path!r}.")
+        with open(src_path, "r") as fd:
+            src_lines = fd.read().splitlines(keepends=True)
+        dest_lines = []
+        if os.path.exists(dest_path):
+            with open(dest_path, "r") as fd:
+                dest_lines = fd.read().splitlines(keepends=True)
+        return self._lines_diff(dest_lines, src_lines, dest_path, src_path)
+
+    @staticmethod
+    def _expanded_path(path: str) -> str:
+        """
+        Return the given path with expanded homedir and environment
+        variables.
+        """
+        expanded_path = os.path.expanduser(os.path.expandvars(path))
+        Print.vv(f"Original path: {path!r}; expanded path: {expanded_path!r}")
+        return expanded_path
+
+    @staticmethod
+    def _lines_diff(old_lines: List[str], new_lines: List[str],
+                    old_path: str, new_path: str) -> str:
+        diff = ""
+        for diff_line in difflib.unified_diff(old_lines, new_lines, old_path, new_path):
+            diff += diff_line
+            if not diff_line.endswith("\n"):
+                diff += "\n\\ No newline at end of file\n"
+        return diff
+
+    def _backup_file(self, path: str) -> None:
+        backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+        backup_file_name = f"{path}.{backup_suffix}"
+        Print.v(f"Backing up {path!r} as {backup_file_name!r}...")
+        if self.dry_run:
+            return
+        try:
+            os.rename(path, backup_file_name)
+        except OSError as err:
+            raise self.ActionError(
+                f"Failed to rename file {path!r} to {backup_file_name!r}: {err!s}"
+            ) from err
+
 
 class CreateAction(Action):
     """
@@ -283,27 +329,6 @@ class CreateAction(Action):
                  else Print.SUCCESS_COLOR)
         return message, color, diff
 
-    def file_diff(self, src_path: str, dest_path: str) -> Optional[str]:
-        if self.show_diff:
-            Print.vv(f"Generating diff between {src_path!r} and {dest_path!r}.")
-            return self._file_diff(src_path, dest_path)
-        return None
-
-    @staticmethod
-    def _file_diff(src_path: str, dest_path: str) -> str:
-        with open(src_path, "r") as fd:
-            src_lines = fd.read().splitlines(keepends=True)
-        dest_lines = []
-        if os.path.exists(dest_path):
-            with open(dest_path, "r") as fd:
-                dest_lines = fd.read().splitlines(keepends=True)
-        diff = ""
-        for diff_line in difflib.unified_diff(dest_lines, src_lines, dest_path, src_path):
-            diff += diff_line
-            if not diff_line.endswith("\n"):
-                diff += "\n\\ No newline at end of file\n"
-        return diff
-
     def _can_replace(self) -> bool:
         return (
             self._parsed_args[self.Args.REPLACE] == self.ForceArg.ALWAYS
@@ -405,19 +430,6 @@ class CreateAction(Action):
         Print.v("Creating new link/copy...")
         create_fn(source_path, dest_path)
 
-    def _backup_file(self, path: str) -> None:
-        backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
-        backup_file_name = f"{path}.{backup_suffix}"
-        Print.v(f"Backing up {path!r} as {backup_file_name!r}...")
-        if self.dry_run:
-            return
-        try:
-            os.rename(path, backup_file_name)
-        except OSError as err:
-            raise self.CreateActionError(
-                f"Failed to rename file {path!r} to {backup_file_name!r}: {err!s}"
-            ) from err
-
     def _execute_for_link(self, source_path: str, dest_path: str) -> Tuple[Result, Optional[str]]:
         if os.path.exists(dest_path):
             if os.path.islink(dest_path):
@@ -425,17 +437,17 @@ class CreateAction(Action):
                 if link_source == source_path:
                     Print.v("Correct link already exists.")
                     return self.Result.LINK_AS_EXPECTED, None
-                diff = self.file_diff(source_path, dest_path)
+                diff = self._file_diff(source_path, dest_path)
                 self._relink(source_path, dest_path, link_source)
                 return self.Result.RELINKED, diff
             if os.path.isfile(dest_path):
-                diff = self.file_diff(source_path, dest_path)
+                diff = self._file_diff(source_path, dest_path)
                 self._replace_file(source_path, dest_path, self._create_link)
                 return self.Result.REPLACED_FILE_WITH_LINK, diff
             raise self.CreateActionError(
                 f"Destination exists but it's not a file or link, not replacing: {dest_path!r}"
             )
-        diff = self.file_diff(source_path, dest_path)
+        diff = self._file_diff(source_path, dest_path)
         if os.path.islink(dest_path):  # Broken link
             link_source = os.readlink(dest_path)
             Print.v(f"Found broken link {link_source!r} -> {dest_path!r}")
@@ -447,20 +459,20 @@ class CreateAction(Action):
     def _execute_for_copy(self, source_path: str, dest_path: str) -> Tuple[Result, Optional[str]]:
         if os.path.exists(dest_path):
             if os.path.islink(dest_path):
-                diff = self.file_diff(source_path, dest_path)
+                diff = self._file_diff(source_path, dest_path)
                 self._replace_link(source_path, dest_path)
                 return self.Result.REPLACED_LINK_WITH_FILE, diff
             if os.path.isfile(dest_path):
                 if file_checksum(source_path) == file_checksum(dest_path):
                     Print.v("Correct file already exists.")
                     return self.Result.FILE_AS_EXPECTED, None
-                diff = self.file_diff(source_path, dest_path)
+                diff = self._file_diff(source_path, dest_path)
                 self._replace_file(source_path, dest_path, self._create_copy)
                 return self.Result.REPLACED_FILE, diff
             raise self.CreateActionError(
                 f"Destination exists but it's not a file or link, not replacing: {dest_path!r}"
             )
-        diff = self.file_diff(source_path, dest_path)
+        diff = self._file_diff(source_path, dest_path)
         if os.path.islink(dest_path):  # Broken link
             Print.v(f"Found broken link {dest_path!r}")
             self._replace_link(source_path, dest_path)
@@ -473,14 +485,6 @@ class CreateAction(Action):
         Return the given path as absolute path.
         """
         return os.path.normpath(os.path.join(self.local_dir, path))
-
-    @staticmethod
-    def _expanded_path(path: str) -> str:
-        """
-        Return the given path as with expanded homedir and environment
-        variables.
-        """
-        return os.path.expanduser(os.path.expandvars(path))
 
     def _source_path(self) -> str:
         """
@@ -520,8 +524,127 @@ class CreateAction(Action):
         raise RuntimeError("Unreachable")
 
 
+class FileContentAction(Action):
+    """
+    Ensure given content is present in a file.
+    """
+
+    class FileContentActionError(Action.ActionError):
+        pass
+
+    class Args:
+        DEST = "dest"
+        CONTENT = "content"
+        REGEX = "regex"
+        AFTER = "after"
+        BACKUP = "backup"
+
+    args_definition = ArgsDefinition({
+        Args.DEST: {
+            "type": str,
+            "required": True,
+        },
+        Args.CONTENT: {
+            "type": str,
+            "required": True,
+        },
+        Args.REGEX: {
+            "type": str,
+            "required": False,
+            "default": None,
+        },
+        Args.AFTER: {
+            "type": str,
+            "required": False,
+            "default": None,
+        },
+        Args.BACKUP: {
+            "type": bool,
+            "required": False,
+            "default": True,
+        },
+    })
+
+    def _compile_regex(self, regex: str) -> re.Pattern:
+        try:
+            return re.compile(regex, flags=re.MULTILINE)
+        except re.error as err:
+            Print.v(f"Compiling regular expression {regex!r} failed with error: {err!s}")
+            raise self.FileContentActionError("Invalid regular expression {regex!r}: {err!s}")
+
+    def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
+        dest_path = self._expanded_path(self._parsed_args[self.Args.DEST])
+        if not os.path.exists(dest_path):
+            raise self.FileContentActionError(f"Destination file does not exist: {dest_path}")
+        if not os.path.isfile(dest_path):
+            raise self.FileContentActionError(f"Destination path is not a file: {dest_path}")
+
+        with open(dest_path, "r") as fh:
+            file_content = fh.read()
+
+        head, main_content = self._split_on_after_regex(file_content)
+        before_match, after_match, matched = \
+            self._split_around_content_match(main_content, dest_path)
+        new_content = head + before_match + self._parsed_args[self.Args.CONTENT] + after_match
+        diff: Optional[str] = None
+
+        if file_content != new_content:
+            if self.show_diff:
+                diff = self._lines_diff(
+                    file_content.splitlines(keepends=True),
+                    new_content.splitlines(keepends=True),
+                    dest_path,
+                    f"{dest_path} (updated)",
+                )
+            self._backup_file(dest_path)
+            if not self.dry_run:
+                Print.v(f"Applying file content changes to: {dest_path}")
+                with open(dest_path, "w") as fh:
+                    fh.write(new_content)
+
+            message = (f"File content updated: {dest_path!r}" if matched
+                       else f"File content added: {dest_path!r}")
+            color = Print.SUCCESS_COLOR
+        else:
+            message = f"File contents already as expected: {dest_path!r}"
+            color = Print.AS_EXPECTED_COLOR
+        return message, color, diff
+
+    def _split_on_after_regex(self, content: str) -> Tuple[str, str]:
+        if self._parsed_args[self.Args.AFTER] is None:
+            return "", content
+        after_regex = self._compile_regex(self._parsed_args[self.Args.AFTER])
+        after_matches = list(after_regex.finditer(content))
+        if len(after_matches) == 0:
+            return "", content
+        split_idx = after_matches[-1].end()
+        return content[:split_idx], content[split_idx:]
+
+    def _split_around_content_match(self, initial_content: str,
+                                    dest_path: str) -> Tuple[str, str, bool]:
+        if self._parsed_args[self.Args.REGEX] is not None:
+            Print.vv(f"Using content regex: {self._parsed_args[self.Args.REGEX]}")
+            content_regex = self._compile_regex(self._parsed_args[self.Args.REGEX])
+            if not content_regex.match(self._parsed_args[self.Args.CONTENT]):
+                raise self.FileContentActionError(
+                    f"Given content does not match the regular expression (file: {dest_path!r})"
+                )
+            matches = list(content_regex.finditer(initial_content))
+            if len(matches) == 0:
+                return initial_content, "", False
+            idx_start = matches[-1].start()
+            idx_end = matches[-1].end()
+            return initial_content[:idx_start], initial_content[idx_end:], True
+        new_content = self._parsed_args[self.Args.CONTENT]
+        idx_start = initial_content.rfind(new_content)
+        if idx_start == -1:
+            return initial_content, "", False
+        return initial_content[:idx_start], initial_content[idx_start+len(new_content):], True
+
+
 ACTIONS_MAP: Dict[str, Type[Action]] = {
     "create": CreateAction,
+    "filecontent": FileContentAction,
 }
 
 
