@@ -237,11 +237,13 @@ class CreateAction(Action):
 
     class Result(Enum):
         LINK_AS_EXPECTED = "Correct link already exists"
+        LINK_MODE_CHANGED = "Correct link exists, permissions updated"
         NEW_LINK_CREATED = "New link created"
         RELINKED = "Incorrect link was relinked"
         RELINKED_BROKEN_LINK = "Broken link was relinked"
         REPLACED_FILE_WITH_LINK = "Replaced file with link"
         FILE_AS_EXPECTED = "Correct file already exists"
+        FILE_MODE_CHANGED = "Correct file exists, permissions updated"
         NEW_FILE_CREATED = "New file created"
         REPLACED_LINK_WITH_FILE = "Replaced link with file"
         REPLACED_BROKEN_LINK_WITH_FILE = "Replaced broken link with file"
@@ -256,6 +258,7 @@ class CreateAction(Action):
         BACKUP = "backup"
         CREATE_DIRS = "create_dirs"
         DEST_TYPE = "dest_type"
+        MODE = "mode"
 
     class TypeArg:
         LINK = "link"
@@ -313,6 +316,12 @@ class CreateAction(Action):
             "required": False,
             "default": DestTypeArg.NORMAL,
         },
+        # Note: setting mode for links will change the permissions of the source
+        Args.MODE: {
+            "type": str,
+            "required": False,
+            "default": None,
+        }
     })
 
     def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
@@ -326,6 +335,13 @@ class CreateAction(Action):
             result, diff = self._execute_for_copy(source_path, dest_path)
         else:
             raise RuntimeError("Unreachable")
+
+        if self._update_permissions(dest_path, self._parsed_args[self.Args.MODE]):
+            if result == self.Result.FILE_AS_EXPECTED:
+                result = self.Result.FILE_MODE_CHANGED
+            elif result == self.Result.LINK_AS_EXPECTED:
+                result = self.Result.LINK_MODE_CHANGED
+
         message = f"{result.value} {source_path!r} -> {dest_path!r}"
         color = (Print.AS_EXPECTED_COLOR
                  if result in [self.Result.LINK_AS_EXPECTED, self.Result.FILE_AS_EXPECTED]
@@ -343,6 +359,25 @@ class CreateAction(Action):
             self._parsed_args[self.Args.RELINK] == self.ForceArg.ALWAYS
             or (self._parsed_args[self.Args.RELINK] == self.ForceArg.ALLOW and self.force)
         )
+
+    def _update_permissions(self, file_path: str, mode: Optional[str]) -> bool:
+        """
+        Update permissions of given file if needed and return whether
+        any change was made.
+        """
+        if not mode:
+            return False
+        if self.dry_run and not os.path.exists(file_path):
+            return False
+        file_stat = os.stat(file_path)
+        file_mode = oct(file_stat.st_mode)[-3:]
+        if file_mode == mode:
+            Print.vv(f"File permissions already set to {mode!r} for {file_path!r}")
+            return False
+        Print.v(f"Changing file permissions from {file_mode!r} to {mode!r} for {file_path!r}")
+        if not self.dry_run:
+            os.chmod(file_path, int(mode, base=8))
+        return True
 
     def _create_link(self, source_path: str, dest_path: str) -> None:
         if self.dry_run:
