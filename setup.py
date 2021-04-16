@@ -5,7 +5,10 @@ import setuptools
 
 
 def get_version() -> str:
-    init_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "dotfilelink/__init__.py")
+    init_path = os.path.join(
+        os.path.abspath(os.path.dirname(__file__)),
+        "dotfilelink/dotfilelink.py",
+    )
     with open(init_path, "r") as fh:
         init_file = fh.read()
     match = re.search(r"^__version__ = ['\"]([^'\"]*)['\"]", init_file, re.M)

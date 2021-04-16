@@ -16,11 +16,13 @@ from typing import List, Dict, Tuple, IO, Any, Optional, Callable, Type
 
 import yaml
 
-from . import __version__
+
+__version__ = "0.2.0"
 
 
 DEFAULT_DOTFILE_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
 DEFAULT_DOTFILE_CONFIG = os.path.expanduser(DEFAULT_DOTFILE_CONFIG_NOTEXPANDED)
+
 
 class Print:
 
