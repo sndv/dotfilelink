@@ -19,7 +19,8 @@ import yaml
 from . import __version__
 
 
-DEFAULT_DOTFILE_CONFIG = os.path.expanduser("~/dotfiles/config.yml")
+DEFAULT_DOTFILE_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
+DEFAULT_DOTFILE_CONFIG = os.path.expanduser(DEFAULT_DOTFILE_CONFIG_NOTEXPANDED)
 
 class Print:
 
@@ -652,15 +653,54 @@ ACTIONS_MAP: Dict[str, Type[Action]] = {
 
 def parse_args(args_list: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--version", "-V", action="store_true")
-    parser.add_argument("--sudo-only", action="store_true")
-    parser.add_argument("--config-file", nargs="?", default=DEFAULT_DOTFILE_CONFIG,
-                        type=argparse.FileType("r"))
-    parser.add_argument("--verbose", "-v", action="count", default=0)
-    parser.add_argument("--color", default="auto", choices=["always", "auto", "never"])
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--diff", action="store_true")
-    parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--version",
+        "-V",
+        action="store_true",
+        help="print version and exit",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="count",
+        default=0,
+        help="verbose mode; specifing the option multiple times increases the verbosity",
+    )
+    parser.add_argument(
+        "--sudo-only",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--config-file",
+        nargs="?",
+        default=DEFAULT_DOTFILE_CONFIG,
+        type=argparse.FileType("r"),
+        help=f"dotfiles yaml configuration file; default is {DEFAULT_DOTFILE_CONFIG_NOTEXPANDED}",
+    )
+    parser.add_argument(
+        "--color",
+        default="auto",
+        choices=["always", "auto", "never"],
+        help="colorize the output; can be 'always' (default), 'auto', or 'never'",
+    )
+    parser.add_argument(
+        "--dry-run",
+        "-n",
+        action="store_true",
+        help="don't make changes, only show what will be done",
+    )
+    parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="show the differences in changed files; works great with --dry-run"
+
+    )
+    parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="overwrite existing files by default",
+    )
     args = parser.parse_args(args_list)
     return args
 
