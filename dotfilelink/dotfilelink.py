@@ -669,6 +669,7 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
     parser.add_argument(
         "--sudo-only",
         action="store_true",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--config-file",
