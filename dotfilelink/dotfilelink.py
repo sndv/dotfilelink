@@ -779,6 +779,7 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--config-file",
+        "-c",
         nargs="?",
         default=DEFAULT_DOTFILE_CONFIG,
         type=argparse.FileType("r"),
@@ -798,9 +799,9 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--diff",
+        "-d",
         action="store_true",
         help="show the differences in changed files; works great with --dry-run"
-
     )
     parser.add_argument(
         "--force",
