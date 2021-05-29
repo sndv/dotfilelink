@@ -22,14 +22,17 @@ pip install git+https://github.com/sndv/dotfilelink
 # Install dotfiles
 dotfilelink -c ~/dotfiles/config.yml
 
+# Config file can also be specified with environment variable
+export DOTFILELINK_CONFIG="$HOME/dotfiles/config.yml"
+
 # Install dotfiles, replacing existing files
-dotfilelink --force -c ~/dotfiles/config.yml
+dotfilelink --force
 
 # Only show what will be done
-dotfilelink --dry-run -c ~/dotfiles/config.yml
+dotfilelink --dry-run
 
 # Show what will be done including difference in changed files
-dotfilelink --dry-run --diff -c ~/dotfiles/config.yml
+dotfilelink --dry-run --diff
 ```
 
 ## Configuration
