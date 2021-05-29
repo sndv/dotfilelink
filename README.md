@@ -1,6 +1,6 @@
 # Dotfilelink
 
-A tool to install dotfiles based on a configuration file.
+A tool for installing dotfiles.
 
 ## Install
 
