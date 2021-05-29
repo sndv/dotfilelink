@@ -11,17 +11,20 @@ import subprocess
 import difflib
 from enum import Enum
 from datetime import datetime
-from typing import List, Dict, Tuple, IO, Any, Optional, Type
+from typing import List, Dict, Tuple, IO, Any, Optional, Type, cast
 
 import yaml
 import requests
 
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 
-DEFAULT_DOTFILE_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
-DEFAULT_DOTFILE_CONFIG = os.path.expanduser(DEFAULT_DOTFILE_CONFIG_NOTEXPANDED)
+DEFAULT_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
+DEFAULT_CONFIG = os.path.expanduser(DEFAULT_CONFIG_NOTEXPANDED)
+ALTERNATIVE_CONFIG = os.path.expanduser("~/dotfiles/config.yaml")
+
+CONFIG_ENV_VAR = "DOTFILELINK_CONFIG"
 
 
 class Print:
@@ -781,9 +784,7 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
         "--config-file",
         "-c",
         nargs="?",
-        default=DEFAULT_DOTFILE_CONFIG,
-        type=argparse.FileType("r"),
-        help=f"dotfiles yaml configuration file; default is {DEFAULT_DOTFILE_CONFIG_NOTEXPANDED}",
+        help=f"dotfiles yaml configuration file; default is {DEFAULT_CONFIG_NOTEXPANDED}",
     )
     parser.add_argument(
         "--color",
@@ -811,6 +812,29 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
     )
     args = parser.parse_args(args_list)
     return args
+
+
+def get_config_file_path(args: argparse.Namespace) -> str:
+    args_config_file = cast(Optional[str], args.config_file)
+    for path, source in ((args_config_file, "command line arguments"),
+                         (os.environ.get(CONFIG_ENV_VAR), "environment variable")):
+        if path:
+            full_path = os.path.abspath(path)
+            if not os.path.isfile(full_path):
+                Print.info(f"No such file: {full_path}")
+                sys.exit(1)
+            Print.v(f"Using config path from {source}: {full_path}")
+            return full_path
+    if os.path.isfile(DEFAULT_CONFIG):
+        Print.v(f"Using default config path: {DEFAULT_CONFIG}")
+        return DEFAULT_CONFIG
+    if os.path.isfile(ALTERNATIVE_CONFIG):
+        Print.v(f"Using alternative default config path: {ALTERNATIVE_CONFIG}")
+        return ALTERNATIVE_CONFIG
+    Print.info(
+        f"No config file provided. Use -c/--config-file or {CONFIG_ENV_VAR} environment variable."
+    )
+    sys.exit(1)
 
 
 def parse_yaml_file(fh: IO[str]) -> Any:
@@ -852,16 +876,15 @@ def parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
         sys.exit(1)
 
 
-def execute_dotfilelink_with_sudo() -> int:
+def execute_dotfilelink_with_sudo(config_path: str) -> int:
     colors = "always" if Print.COLORS_ENABLED else "never"
     command = [
         "sudo", sys.executable, __file__,
         *sys.argv[1:],
         "--color", colors,
+        "--config-file", config_path,
         "--sudo-only",
     ]
-    if "--config-file" not in command:
-        command += ["--config-file", DEFAULT_DOTFILE_CONFIG]
     process = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert process.stdout is not None and process.stderr is not None
 
@@ -897,9 +920,11 @@ def main() -> None:
         Print.failure("The '--sudo-only' mode can only be run as root.")
         sys.exit(1)
 
-    config = parse_yaml_file(args.config_file)
+    config_file_path = get_config_file_path(args)
+    with open(config_file_path, "r") as fh:
+        config = parse_yaml_file(fh)
     # Use the configuration file local directory when resolving paths
-    config_local_dir = os.path.dirname(os.path.abspath(args.config_file.name))
+    config_local_dir = os.path.dirname(config_file_path)
     actions = parse_configuraiton(config, local_dir=config_local_dir, dry_run=args.dry_run,
                                   show_diff=args.diff, force=args.force)
     non_sudo_actions = [action for action in actions if not action.sudo]
@@ -919,7 +944,7 @@ def main() -> None:
 
     if not args.sudo_only and not am_root and sudo_actions:
         Print.vv("Starting new process for sudo actions")
-        return_code = execute_dotfilelink_with_sudo()
+        return_code = execute_dotfilelink_with_sudo(config_file_path)
         success = return_code == 0
         initial_task_number = len(sudo_actions) + 1
 
