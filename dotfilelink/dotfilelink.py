@@ -813,6 +813,11 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
         action="store_true",
         help="overwrite existing files by default",
     )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="disable request caching",
+    )
     args = parser.parse_args(args_list)
     return args
 
@@ -904,6 +909,18 @@ def execute_dotfilelink_with_sudo(config_path: str) -> int:
     return return_code
 
 
+def _enable_cache(timeout_minutes: int) -> None:
+    requests_cache.install_cache(
+        cache_name='dotfilelink_cache',
+        expire_after=timedelta(minutes=timeout_minutes),
+        use_cache_dir=True,
+        cache_control=False,
+        allowable_codes=[200],
+        allowable_methods=['GET'],
+        stale_if_error=False,
+    )
+
+
 def main() -> None:
     args = parse_args(sys.argv[1:])
     Print.VERBOSITY_LEVEL = args.verbose
@@ -917,6 +934,9 @@ def main() -> None:
     if args.version:
         Print.info(f"dotfilelink v{__version__}")
         sys.exit(0)
+
+    if not args.no_cache:
+        _enable_cache(REQUESTS_CACHE_TIMEOUT_MINUTES)
 
     am_root = os.geteuid() == 0
     if args.sudo_only and not am_root:
@@ -969,13 +989,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    requests_cache.install_cache(
-        cache_name='dotfilelink_cache',
-        expire_after=timedelta(minutes=REQUESTS_CACHE_TIMEOUT_MINUTES),
-        use_cache_dir=True,
-        cache_control=False,
-        allowable_codes=[200],
-        allowable_methods=['GET'],
-        stale_if_error=False,
-    )
     main()
