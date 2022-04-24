@@ -10,11 +10,12 @@ import hashlib
 import subprocess
 import difflib
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, IO, Any, Optional, Type, cast
 
 import yaml
 import requests
+import requests_cache
 
 
 __version__ = "0.3.1"
@@ -25,6 +26,8 @@ DEFAULT_CONFIG = os.path.expanduser(DEFAULT_CONFIG_NOTEXPANDED)
 ALTERNATIVE_CONFIG = os.path.expanduser("~/dotfiles/config.yaml")
 
 CONFIG_ENV_VAR = "DOTFILELINK_CONFIG"
+
+REQUESTS_CACHE_TIMEOUT_MINUTES = 10
 
 
 class Print:
@@ -966,4 +969,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    requests_cache.install_cache(
+        cache_name='dotfilelink_cache',
+        expire_after=timedelta(minutes=REQUESTS_CACHE_TIMEOUT_MINUTES),
+        use_cache_dir=True,
+        cache_control=False,
+        allowable_codes=[200],
+        allowable_methods=['GET'],
+        stale_if_error=False,
+    )
     main()
