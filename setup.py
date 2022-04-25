@@ -32,6 +32,8 @@ setuptools.setup(
     python_requires=">=3.8",
     install_requires=[
         "PyYAML>=5.4",
+        "requests>=2.25.0",
+        "requests-cache>=0.9.4",
     ],
     entry_points = {
         "console_scripts": [

@@ -7,21 +7,27 @@ import glob
 import re
 import argparse
 import hashlib
-import shutil
 import subprocess
 import difflib
 from enum import Enum
-from datetime import datetime
-from typing import List, Dict, Tuple, IO, Any, Optional, Callable, Type
+from datetime import datetime, timedelta
+from typing import List, Dict, Tuple, IO, Any, Optional, Type, cast
 
 import yaml
+import requests
+import requests_cache
 
 
-__version__ = "0.2.0"
+__version__ = "0.3.1"
 
 
-DEFAULT_DOTFILE_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
-DEFAULT_DOTFILE_CONFIG = os.path.expanduser(DEFAULT_DOTFILE_CONFIG_NOTEXPANDED)
+DEFAULT_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
+DEFAULT_CONFIG = os.path.expanduser(DEFAULT_CONFIG_NOTEXPANDED)
+ALTERNATIVE_CONFIG = os.path.expanduser("~/dotfiles/config.yaml")
+
+CONFIG_ENV_VAR = "DOTFILELINK_CONFIG"
+
+REQUESTS_CACHE_TIMEOUT_MINUTES = 10
 
 
 class Print:
@@ -100,6 +106,23 @@ class Print:
     def failure(cls, msg: str, **kwargs: Any) -> None:
         cls.color(msg, color=cls.FAILURE_COLOR, **kwargs)
 
+    @classmethod
+    def file_diff(cls, diff: str) -> None:
+        if cls.COLORS_ENABLED:
+            diff_lines = diff.splitlines()
+            diff_lines_color = diff_lines[:2]
+            for line in diff_lines[2:]:
+                if line.startswith("@"):
+                    diff_lines_color.append(f"{cls.ANSI_COLOR.CYAN.value}{line}{cls.ANSI_COLOR.END.value}")
+                elif line.startswith("-"):
+                    diff_lines_color.append(f"{cls.ANSI_COLOR.RED.value}{line}{cls.ANSI_COLOR.END.value}")
+                elif line.startswith("+"):
+                    diff_lines_color.append(f"{cls.ANSI_COLOR.GREEN.value}{line}{cls.ANSI_COLOR.END.value}")
+                else:
+                    diff_lines_color.append(line)
+            diff = "\n".join(diff_lines_color) + "\n"
+        sys.stdout.write(diff + "\n")
+
 
 def file_checksum(path: str) -> str:
     with open(path, "rb") as f:
@@ -108,6 +131,12 @@ def file_checksum(path: str) -> str:
         while chunk:
             file_hash.update(chunk)
             chunk = f.read(8192)
+    return file_hash.hexdigest()
+
+
+def content_checksum(content: str) -> str:
+    file_hash = hashlib.blake2b()
+    file_hash.update(content.encode("utf-8"))
     return file_hash.hexdigest()
 
 
@@ -186,14 +215,20 @@ class Action:
     def _file_diff(self, src_path: str, dest_path: str) -> Optional[str]:
         if not self.show_diff:
             return None
-        Print.vv(f"Generating diff between {src_path!r} and {dest_path!r}.")
         with open(src_path, "r") as fd:
-            src_lines = fd.read().splitlines(keepends=True)
+            src_content = fd.read()
+        return self._file_content_diff(src_path, src_content, dest_path)
+
+    def _file_content_diff(self, src_name: str, src_content: str, dest_path: str) -> Optional[str]:
+        if not self.show_diff:
+            return None
+        Print.vv(f"Generating diff between {src_name!r} and {dest_path!r}.")
+        src_lines = src_content.splitlines(keepends=True)
         dest_lines = []
         if os.path.exists(dest_path):
             with open(dest_path, "r") as fd:
                 dest_lines = fd.read().splitlines(keepends=True)
-        return self._lines_diff(dest_lines, src_lines, dest_path, src_path)
+        return self._lines_diff(dest_lines, src_lines, dest_path, src_name)
 
     @staticmethod
     def _expanded_path(path: str) -> str:
@@ -228,6 +263,12 @@ class Action:
                 f"Failed to rename file {path!r} to {backup_file_name!r}: {err!s}"
             ) from err
 
+    def _get_from_url(self, url: str) -> str:
+        resp = requests.get(url)
+        if resp.status_code != 200:
+            raise self.ActionError(f"GET request failed for: {url!r}")
+        return resp.text
+
 
 class CreateAction(Action):
     """
@@ -259,12 +300,19 @@ class CreateAction(Action):
         REPLACE = "replace"
         BACKUP = "backup"
         CREATE_DIRS = "create_dirs"
+        SRC_TYPE = "src_type"
         DEST_TYPE = "dest_type"
         MODE = "mode"
 
     class TypeArg:
+        AUTO = "auto"
         LINK = "link"
         COPY = "copy"
+
+    class SrcTypeArg:
+        AUTO = "auto"
+        PATH = "path"
+        URL = "url"
 
     class DestTypeArg:
         NORMAL = "normal"
@@ -278,9 +326,9 @@ class CreateAction(Action):
     args_definition = ArgsDefinition({
         Args.TYPE: {
             "type": str,
-            "choices": [TypeArg.LINK, TypeArg.COPY],
+            "choices": [TypeArg.AUTO, TypeArg.LINK, TypeArg.COPY],
             "required": False,
-            "default": TypeArg.LINK,
+            "default": TypeArg.AUTO,
         },
         Args.SRC: {
             "type": str,
@@ -312,6 +360,12 @@ class CreateAction(Action):
             "required": False,
             "default": False,
         },
+        Args.SRC_TYPE: {
+            "type": str,
+            "choices": [SrcTypeArg.AUTO, SrcTypeArg.PATH, SrcTypeArg.URL],
+            "required": False,
+            "default": SrcTypeArg.AUTO,
+        },
         Args.DEST_TYPE: {
             "type": str,
             "choices": [DestTypeArg.NORMAL, DestTypeArg.GLOB_SINGLE],
@@ -327,16 +381,8 @@ class CreateAction(Action):
     })
 
     def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
-        source_path = self._source_path()
-        dest_path = self._dest_path()
-        Print.v(f"Creating {self._parsed_args[self.Args.TYPE]} of {source_path} "
-                f"at {self._parsed_args[self.Args.DEST]}")
-        if self._parsed_args[self.Args.TYPE] == self.TypeArg.LINK:
-            result, diff = self._execute_for_link(source_path, dest_path)
-        elif self._parsed_args[self.Args.TYPE] == self.TypeArg.COPY:
-            result, diff = self._execute_for_copy(source_path, dest_path)
-        else:
-            raise RuntimeError("Unreachable")
+        self._populate_auto_args()
+        source, dest_path, result, diff = self._execute()
 
         if self._update_permissions(dest_path, self._parsed_args[self.Args.MODE]):
             if result == self.Result.FILE_AS_EXPECTED:
@@ -344,11 +390,57 @@ class CreateAction(Action):
             elif result == self.Result.LINK_AS_EXPECTED:
                 result = self.Result.LINK_MODE_CHANGED
 
-        message = f"{result.value} {source_path!r} -> {dest_path!r}"
+        message = f"{result.value} {source!r} -> {dest_path!r}"
         color = (Print.AS_EXPECTED_COLOR
                  if result in [self.Result.LINK_AS_EXPECTED, self.Result.FILE_AS_EXPECTED]
                  else Print.SUCCESS_COLOR)
         return message, color, diff
+
+    def _execute(self) -> Tuple[str, str, Result, Optional[str]]:
+        dest_path = self._dest_path()
+        if self._parsed_args[self.Args.SRC_TYPE] == self.SrcTypeArg.URL:
+            source: str = self._parsed_args[self.Args.SRC]
+            if self._parsed_args[self.Args.TYPE] == self.TypeArg.LINK:
+                raise self.ActionError(
+                    f"Cannot link to a url source: {source!r} -> {dest_path!r}"
+                )
+            if self._parsed_args[self.Args.TYPE] == self.TypeArg.COPY:
+                source_content = self._get_from_url(source)
+                Print.v(f"Creating copy of {source} at {self._parsed_args[self.Args.DEST]}")
+                result, diff = self._execute_for_copy(source, source_content, dest_path)
+            else:
+                raise RuntimeError("Unreachable")
+        elif self._parsed_args[self.Args.SRC_TYPE] == self.SrcTypeArg.PATH:
+            source = self._source_path()
+            with open(source, "r") as fh:
+                source_content = fh.read()
+            Print.v(f"Creating {self._parsed_args[self.Args.TYPE]} of {source} "
+                    f"at {self._parsed_args[self.Args.DEST]}")
+            if self._parsed_args[self.Args.TYPE] == self.TypeArg.LINK:
+                if self.sudo:
+                    Print.info(f"Warning: sudo option used with symlink, "
+                               "this is not recommended for security reasons")
+                result, diff = self._execute_for_link(source, dest_path)
+            elif self._parsed_args[self.Args.TYPE] == self.TypeArg.COPY:
+                result, diff = self._execute_for_copy(source, source_content, dest_path)
+            else:
+                raise RuntimeError("Unreachable")
+        else:
+            raise RuntimeError("Unreachable")
+        return source, dest_path, result, diff
+
+    def _populate_auto_args(self) -> None:
+        if self._parsed_args[self.Args.SRC_TYPE] == self.SrcTypeArg.AUTO:
+            if (self._parsed_args[self.Args.SRC].startswith("http://")
+                    or self._parsed_args[self.Args.SRC].startswith("https://")):
+                self._parsed_args[self.Args.SRC_TYPE] = self.SrcTypeArg.URL
+            else:
+                self._parsed_args[self.Args.SRC_TYPE] = self.SrcTypeArg.PATH
+        if self._parsed_args[self.Args.TYPE] == self.TypeArg.AUTO:
+            if self.sudo or self._parsed_args[self.Args.SRC_TYPE] == self.SrcTypeArg.URL:
+                self._parsed_args[self.Args.TYPE] = self.TypeArg.COPY
+            else:
+                self._parsed_args[self.Args.TYPE] = self.TypeArg.LINK
 
     def _can_replace(self) -> bool:
         return (
@@ -382,6 +474,7 @@ class CreateAction(Action):
         return True
 
     def _create_link(self, source_path: str, dest_path: str) -> None:
+        Print.v("Creating new link...")
         if self.dry_run:
             return
         try:
@@ -391,14 +484,16 @@ class CreateAction(Action):
                 f"Failed to create link {source_path!r} -> {dest_path!r}: {err!s}"
             ) from err
 
-    def _create_copy(self, source_path: str, dest_path: str) -> None:
+    def _create_copy(self, source_name: str, source_content: str, dest_path: str) -> None:
+        Print.v("Creating new copy...")
         if self.dry_run:
             return
         try:
-            shutil.copyfile(source_path, dest_path)
+            with open(dest_path, "w") as fh:
+                fh.write(source_content)
         except OSError as err:
             raise self.CreateActionError(
-                f"Failed to copy file: {source_path!r} -> {dest_path!r}: {err!s}"
+                f"Failed to create file: {source_name!r} -> {dest_path!r}: {err!s}"
             ) from err
 
     def _create_dirs(self, dir_path: str) -> None:
@@ -429,7 +524,7 @@ class CreateAction(Action):
         self._unlink(dest_path)
         self._create_link(source_path, dest_path)
 
-    def _replace_link(self, source_path: str, dest_path: str) -> None:
+    def _replace_link(self, source_name: str, source_content: str, dest_path: str) -> None:
         if not self._can_replace():
             raise self.CreateActionError(
                 f"Can't create copy, destination exists as link: {dest_path!r}"
@@ -438,10 +533,9 @@ class CreateAction(Action):
         if self.dry_run:
             return
         self._unlink(dest_path)
-        self._create_copy(source_path, dest_path)
+        self._create_copy(source_name, source_content, dest_path)
 
-    def _replace_file(self, source_path: str, dest_path: str,
-                      create_fn: Callable[[str, str], None]) -> None:
+    def _prepare_replace_file(self, dest_path: str) -> None:
         if not self._can_replace():
             raise self.CreateActionError(
                 f"Can't create link or copy, destination file exists: {dest_path!r}"
@@ -457,18 +551,14 @@ class CreateAction(Action):
                 raise self.CreateActionError(
                     f"Failed to remove file {dest_path!r}: {err!s}"
                 ) from err
-        create_fn(source_path, dest_path)
 
-    def _create_with_dir(self, source_path: str, dest_path: str,
-                         create_fn: Callable[[str, str], None]) -> None:
+    def _prepare_create_with_dir(self, dest_path: str) -> None:
         dest_directory = os.path.dirname(dest_path)
         if not os.path.isdir(dest_directory):
             if self._parsed_args[self.Args.CREATE_DIRS]:
                 self._create_dirs(dest_directory)
             else:
                 raise self.CreateActionError(f"Directory does not exist: {dest_path!r}")
-        Print.v("Creating new link/copy...")
-        create_fn(source_path, dest_path)
 
     def _execute_for_link(self, source_path: str, dest_path: str) -> Tuple[Result, Optional[str]]:
         if os.path.exists(dest_path):
@@ -482,7 +572,8 @@ class CreateAction(Action):
                 return self.Result.RELINKED, diff
             if os.path.isfile(dest_path):
                 diff = self._file_diff(source_path, dest_path)
-                self._replace_file(source_path, dest_path, self._create_link)
+                self._prepare_replace_file(dest_path)
+                self._create_link(source_path, dest_path)
                 return self.Result.REPLACED_FILE_WITH_LINK, diff
             raise self.CreateActionError(
                 f"Destination exists but it's not a file or link, not replacing: {dest_path!r}"
@@ -493,31 +584,35 @@ class CreateAction(Action):
             Print.v(f"Found broken link {link_source!r} -> {dest_path!r}")
             self._relink(source_path, dest_path, link_source)
             return self.Result.RELINKED_BROKEN_LINK, diff
-        self._create_with_dir(source_path, dest_path, self._create_link)
+        self._prepare_create_with_dir(dest_path)
+        self._create_link(source_path, dest_path)
         return self.Result.NEW_LINK_CREATED, diff
 
-    def _execute_for_copy(self, source_path: str, dest_path: str) -> Tuple[Result, Optional[str]]:
+    def _execute_for_copy(self, source_name: str, source_content: str,
+                          dest_path: str) -> Tuple[Result, Optional[str]]:
         if os.path.exists(dest_path):
             if os.path.islink(dest_path):
-                diff = self._file_diff(source_path, dest_path)
-                self._replace_link(source_path, dest_path)
+                diff = self._file_content_diff(source_name, source_content, dest_path)
+                self._replace_link(source_name, source_content, dest_path)
                 return self.Result.REPLACED_LINK_WITH_FILE, diff
             if os.path.isfile(dest_path):
-                if file_checksum(source_path) == file_checksum(dest_path):
+                if content_checksum(source_content) == file_checksum(dest_path):
                     Print.v("Correct file already exists.")
                     return self.Result.FILE_AS_EXPECTED, None
-                diff = self._file_diff(source_path, dest_path)
-                self._replace_file(source_path, dest_path, self._create_copy)
+                diff = self._file_content_diff(source_name, source_content, dest_path)
+                self._prepare_replace_file(dest_path)
+                self._create_copy(source_name, source_content, dest_path)
                 return self.Result.REPLACED_FILE, diff
             raise self.CreateActionError(
                 f"Destination exists but it's not a file or link, not replacing: {dest_path!r}"
             )
-        diff = self._file_diff(source_path, dest_path)
+        diff = self._file_content_diff(source_name, source_content, dest_path)
         if os.path.islink(dest_path):  # Broken link
             Print.v(f"Found broken link {dest_path!r}")
-            self._replace_link(source_path, dest_path)
+            self._replace_link(source_name, source_content, dest_path)
             return self.Result.REPLACED_BROKEN_LINK_WITH_FILE, diff
-        self._create_with_dir(source_path, dest_path, self._create_copy)
+        self._prepare_create_with_dir(dest_path)
+        self._create_copy(source_name, source_content, dest_path)
         return self.Result.NEW_FILE_CREATED, diff
 
     def _absolute_path(self, path: str) -> str:
@@ -710,10 +805,9 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--config-file",
+        "-c",
         nargs="?",
-        default=DEFAULT_DOTFILE_CONFIG,
-        type=argparse.FileType("r"),
-        help=f"dotfiles yaml configuration file; default is {DEFAULT_DOTFILE_CONFIG_NOTEXPANDED}",
+        help=f"dotfiles yaml configuration file; default is {DEFAULT_CONFIG_NOTEXPANDED}",
     )
     parser.add_argument(
         "--color",
@@ -729,9 +823,9 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--diff",
+        "-d",
         action="store_true",
         help="show the differences in changed files; works great with --dry-run"
-
     )
     parser.add_argument(
         "--force",
@@ -739,8 +833,41 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
         action="store_true",
         help="overwrite existing files by default",
     )
+    parser.add_argument(
+        "--allow-root",
+        action="store_true",
+        help="allow execution as root",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="disable request caching",
+    )
     args = parser.parse_args(args_list)
     return args
+
+
+def get_config_file_path(args: argparse.Namespace) -> str:
+    args_config_file = cast(Optional[str], args.config_file)
+    for path, source in ((args_config_file, "command line arguments"),
+                         (os.environ.get(CONFIG_ENV_VAR), "environment variable")):
+        if path:
+            full_path = os.path.abspath(path)
+            if not os.path.isfile(full_path):
+                Print.info(f"No such file: {full_path}")
+                sys.exit(1)
+            Print.v(f"Using config path from {source}: {full_path}")
+            return full_path
+    if os.path.isfile(DEFAULT_CONFIG):
+        Print.v(f"Using default config path: {DEFAULT_CONFIG}")
+        return DEFAULT_CONFIG
+    if os.path.isfile(ALTERNATIVE_CONFIG):
+        Print.v(f"Using alternative default config path: {ALTERNATIVE_CONFIG}")
+        return ALTERNATIVE_CONFIG
+    Print.info(
+        f"No config file provided. Use -c/--config-file or {CONFIG_ENV_VAR} environment variable."
+    )
+    sys.exit(1)
 
 
 def parse_yaml_file(fh: IO[str]) -> Any:
@@ -782,16 +909,15 @@ def parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
         sys.exit(1)
 
 
-def execute_dotfilelink_with_sudo() -> int:
+def execute_dotfilelink_with_sudo(config_path: str) -> int:
     colors = "always" if Print.COLORS_ENABLED else "never"
     command = [
         "sudo", sys.executable, __file__,
         *sys.argv[1:],
         "--color", colors,
+        "--config-file", config_path,
         "--sudo-only",
     ]
-    if "--config-file" not in command:
-        command += ["--config-file", DEFAULT_DOTFILE_CONFIG]
     process = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert process.stdout is not None and process.stderr is not None
 
@@ -808,6 +934,18 @@ def execute_dotfilelink_with_sudo() -> int:
     return return_code
 
 
+def _enable_cache(timeout_minutes: int) -> None:
+    requests_cache.install_cache(
+        cache_name='dotfilelink_cache',
+        expire_after=timedelta(minutes=timeout_minutes),
+        use_cache_dir=True,
+        cache_control=False,
+        allowable_codes=[200],
+        allowable_methods=['GET'],
+        stale_if_error=False,
+    )
+
+
 def main() -> None:
     args = parse_args(sys.argv[1:])
     Print.VERBOSITY_LEVEL = args.verbose
@@ -822,14 +960,26 @@ def main() -> None:
         Print.info(f"dotfilelink v{__version__}")
         sys.exit(0)
 
+    if not args.no_cache:
+        _enable_cache(REQUESTS_CACHE_TIMEOUT_MINUTES)
+
     am_root = os.geteuid() == 0
     if args.sudo_only and not am_root:
         Print.failure("The '--sudo-only' mode can only be run as root.")
         sys.exit(1)
+    if am_root and not args.sudo_only:
+        if args.allow_root:
+            Print.info("Warning: running as root")
+        else:
+            Print.info("Warning: Running dotfilelinks with sudo can result in files with "
+                       "incorrect permissions or paths. Use --allow-root if you are sure.")
+            sys.exit(2)
 
-    config = parse_yaml_file(args.config_file)
+    config_file_path = get_config_file_path(args)
+    with open(config_file_path, "r") as fh:
+        config = parse_yaml_file(fh)
     # Use the configuration file local directory when resolving paths
-    config_local_dir = os.path.dirname(os.path.abspath(args.config_file.name))
+    config_local_dir = os.path.dirname(config_file_path)
     actions = parse_configuraiton(config, local_dir=config_local_dir, dry_run=args.dry_run,
                                   show_diff=args.diff, force=args.force)
     non_sudo_actions = [action for action in actions if not action.sudo]
@@ -849,7 +999,7 @@ def main() -> None:
 
     if not args.sudo_only and not am_root and sudo_actions:
         Print.vv("Starting new process for sudo actions")
-        return_code = execute_dotfilelink_with_sudo()
+        return_code = execute_dotfilelink_with_sudo(config_file_path)
         success = return_code == 0
         initial_task_number = len(sudo_actions) + 1
 
@@ -864,11 +1014,14 @@ def main() -> None:
         else:
             Print.color(f"[{task_number}/{len(actions)}] {message}{sudo_msg}", color)
             if diff:
-                sys.stdout.write(diff)
+                Print.file_diff(diff)
 
     if not success:
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        Print.info("\nReceived Ctrl+C, quitting...")
