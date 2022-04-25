@@ -400,6 +400,9 @@ class CreateAction(Action):
             Print.v(f"Creating {self._parsed_args[self.Args.TYPE]} of {source} "
                     f"at {self._parsed_args[self.Args.DEST]}")
             if self._parsed_args[self.Args.TYPE] == self.TypeArg.LINK:
+                if self.sudo:
+                    Print.info(f"Warning: sudo option used with symlink, "
+                               "this is not recommended for security reasons")
                 result, diff = self._execute_for_link(source, dest_path)
             elif self._parsed_args[self.Args.TYPE] == self.TypeArg.COPY:
                 result, diff = self._execute_for_copy(source, source_content, dest_path)
