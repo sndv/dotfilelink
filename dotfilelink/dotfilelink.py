@@ -106,6 +106,23 @@ class Print:
     def failure(cls, msg: str, **kwargs: Any) -> None:
         cls.color(msg, color=cls.FAILURE_COLOR, **kwargs)
 
+    @classmethod
+    def file_diff(cls, diff: str) -> None:
+        if cls.COLORS_ENABLED:
+            diff_lines = diff.splitlines()
+            diff_lines_color = diff_lines[:2]
+            for line in diff_lines[2:]:
+                if line.startswith("@"):
+                    diff_lines_color.append(f"{cls.ANSI_COLOR.CYAN.value}{line}{cls.ANSI_COLOR.END.value}")
+                elif line.startswith("-"):
+                    diff_lines_color.append(f"{cls.ANSI_COLOR.RED.value}{line}{cls.ANSI_COLOR.END.value}")
+                elif line.startswith("+"):
+                    diff_lines_color.append(f"{cls.ANSI_COLOR.GREEN.value}{line}{cls.ANSI_COLOR.END.value}")
+                else:
+                    diff_lines_color.append(line)
+            diff = "\n".join(diff_lines_color) + "\n"
+        sys.stdout.write(diff + "\n")
+
 
 def file_checksum(path: str) -> str:
     with open(path, "rb") as f:
@@ -997,7 +1014,7 @@ def main() -> None:
         else:
             Print.color(f"[{task_number}/{len(actions)}] {message}{sudo_msg}", color)
             if diff:
-                sys.stdout.write(diff)
+                Print.file_diff(diff)
 
     if not success:
         sys.exit(1)
