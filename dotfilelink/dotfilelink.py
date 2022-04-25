@@ -814,6 +814,11 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
         help="overwrite existing files by default",
     )
     parser.add_argument(
+        "--allow-root",
+        action="store_true",
+        help="allow execution as root",
+    )
+    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="disable request caching",
@@ -942,6 +947,13 @@ def main() -> None:
     if args.sudo_only and not am_root:
         Print.failure("The '--sudo-only' mode can only be run as root.")
         sys.exit(1)
+    if am_root and not args.sudo_only:
+        if args.allow_root:
+            Print.info("Warning: running as root")
+        else:
+            Print.info("Warning: Running dotfilelinks with sudo can result in files with "
+                       "incorrect permissions or paths. Use --allow-root if you are sure.")
+            sys.exit(2)
 
     config_file_path = get_config_file_path(args)
     with open(config_file_path, "r") as fh:
