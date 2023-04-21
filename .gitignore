@@ -1,5 +1,7 @@
 __pycache__/
 *.py[coz]
+/build/
+*.egg-info/
 mypy_cache/
 
 .vscode
