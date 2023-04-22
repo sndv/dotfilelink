@@ -35,7 +35,7 @@ setuptools.setup(
         "requests>=2.25.0",
         "requests-cache>=0.9.4",
     ],
-    entry_points = {
+    entry_points={
         "console_scripts": [
             "dotfilelink = dotfilelink.dotfilelink:main",
         ],

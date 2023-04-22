@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import os
@@ -31,7 +30,6 @@ REQUESTS_CACHE_TIMEOUT_MINUTES = 10
 
 
 class Print:
-
     # Set by main()
     VERBOSITY_LEVEL = 0
     COLORS_ENABLED = False
@@ -70,7 +68,6 @@ class Print:
         if cls.ALWAYS_FLUSH:
             kwargs["flush"] = True
         print(*args, **kwargs)
-
 
     @classmethod
     def info(cls, *args: Any, **kwargs: Any) -> None:
@@ -113,11 +110,17 @@ class Print:
             diff_lines_color = diff_lines[:2]
             for line in diff_lines[2:]:
                 if line.startswith("@"):
-                    diff_lines_color.append(f"{cls.ANSI_COLOR.CYAN.value}{line}{cls.ANSI_COLOR.END.value}")
+                    diff_lines_color.append(
+                        f"{cls.ANSI_COLOR.CYAN.value}{line}{cls.ANSI_COLOR.END.value}"
+                    )
                 elif line.startswith("-"):
-                    diff_lines_color.append(f"{cls.ANSI_COLOR.RED.value}{line}{cls.ANSI_COLOR.END.value}")
+                    diff_lines_color.append(
+                        f"{cls.ANSI_COLOR.RED.value}{line}{cls.ANSI_COLOR.END.value}"
+                    )
                 elif line.startswith("+"):
-                    diff_lines_color.append(f"{cls.ANSI_COLOR.GREEN.value}{line}{cls.ANSI_COLOR.END.value}")
+                    diff_lines_color.append(
+                        f"{cls.ANSI_COLOR.GREEN.value}{line}{cls.ANSI_COLOR.END.value}"
+                    )
                 else:
                     diff_lines_color.append(line)
             diff = "\n".join(diff_lines_color) + "\n"
@@ -145,7 +148,6 @@ class ConfigFileError(Exception):
 
 
 class ArgsDefinition:
-
     class InvalidArguments(Exception):
         pass
 
@@ -163,7 +165,8 @@ class ArgsDefinition:
             if not isinstance(value, expected_type):
                 raise self.InvalidArguments(
                     f"Argument {arg_name!r} expects type {expected_type.__name__!r} but got "
-                    f"{type(value).__name__!r} instead (value: {value!r})")
+                    f"{type(value).__name__!r} instead (value: {value!r})"
+                )
             if "choices" in arg_definition and value not in arg_definition["choices"]:
                 raise self.InvalidArguments(
                     f"Value of {arg_name!r} must be one of {arg_definition['choices']}, "
@@ -195,8 +198,14 @@ class Action:
     class SourceDoesNotExist(ActionError):
         pass
 
-    def __init__(self, args: Dict[str, Any], local_dir: str, dry_run: bool = False,
-                 show_diff: bool = False, force: bool = False):
+    def __init__(
+        self,
+        args: Dict[str, Any],
+        local_dir: str,
+        dry_run: bool = False,
+        show_diff: bool = False,
+        force: bool = False,
+    ):
         if not self.args_definition:
             raise NotImplementedError("Abstract class")
         self.sudo: bool = args.pop("sudo", False)
@@ -219,7 +228,9 @@ class Action:
             src_content = fd.read()
         return self._file_content_diff(src_path, src_content, dest_path)
 
-    def _file_content_diff(self, src_name: str, src_content: str, dest_path: str) -> Optional[str]:
+    def _file_content_diff(
+        self, src_name: str, src_content: str, dest_path: str
+    ) -> Optional[str]:
         if not self.show_diff:
             return None
         Print.vv(f"Generating diff between {src_name!r} and {dest_path!r}.")
@@ -241,8 +252,9 @@ class Action:
         return expanded_path
 
     @staticmethod
-    def _lines_diff(old_lines: List[str], new_lines: List[str],
-                    old_path: str, new_path: str) -> str:
+    def _lines_diff(
+        old_lines: List[str], new_lines: List[str], old_path: str, new_path: str
+    ) -> str:
         diff = ""
         for diff_line in difflib.unified_diff(old_lines, new_lines, old_path, new_path):
             diff += diff_line
@@ -323,62 +335,64 @@ class CreateAction(Action):
         ALWAYS = "always"
         NEVER = "never"
 
-    args_definition = ArgsDefinition({
-        Args.TYPE: {
-            "type": str,
-            "choices": [TypeArg.AUTO, TypeArg.LINK, TypeArg.COPY],
-            "required": False,
-            "default": TypeArg.AUTO,
-        },
-        Args.SRC: {
-            "type": str,
-            "required": True,
-        },
-        Args.DEST: {
-            "type": str,
-            "required": True,
-        },
-        Args.RELINK: {
-            "type": str,
-            "choices": [ForceArg.ALLOW, ForceArg.ALWAYS, ForceArg.NEVER],
-            "required": False,
-            "default": ForceArg.ALLOW,
-        },
-        Args.REPLACE: {
-            "type": str,
-            "choices": [ForceArg.ALLOW, ForceArg.ALWAYS, ForceArg.NEVER],
-            "required": False,
-            "default": ForceArg.ALLOW,
-        },
-        Args.BACKUP: {
-            "type": bool,
-            "required": False,
-            "default": True,
-        },
-        Args.CREATE_DIRS: {
-            "type": bool,
-            "required": False,
-            "default": False,
-        },
-        Args.SRC_TYPE: {
-            "type": str,
-            "choices": [SrcTypeArg.AUTO, SrcTypeArg.PATH, SrcTypeArg.URL],
-            "required": False,
-            "default": SrcTypeArg.AUTO,
-        },
-        Args.DEST_TYPE: {
-            "type": str,
-            "choices": [DestTypeArg.NORMAL, DestTypeArg.GLOB_SINGLE],
-            "required": False,
-            "default": DestTypeArg.NORMAL,
-        },
-        # Note: setting mode for links will change the permissions of the source
-        Args.MODE: {
-            "type": str,
-            "required": False,
-            "default": None,
+    args_definition = ArgsDefinition(
+        {
+            Args.TYPE: {
+                "type": str,
+                "choices": [TypeArg.AUTO, TypeArg.LINK, TypeArg.COPY],
+                "required": False,
+                "default": TypeArg.AUTO,
+            },
+            Args.SRC: {
+                "type": str,
+                "required": True,
+            },
+            Args.DEST: {
+                "type": str,
+                "required": True,
+            },
+            Args.RELINK: {
+                "type": str,
+                "choices": [ForceArg.ALLOW, ForceArg.ALWAYS, ForceArg.NEVER],
+                "required": False,
+                "default": ForceArg.ALLOW,
+            },
+            Args.REPLACE: {
+                "type": str,
+                "choices": [ForceArg.ALLOW, ForceArg.ALWAYS, ForceArg.NEVER],
+                "required": False,
+                "default": ForceArg.ALLOW,
+            },
+            Args.BACKUP: {
+                "type": bool,
+                "required": False,
+                "default": True,
+            },
+            Args.CREATE_DIRS: {
+                "type": bool,
+                "required": False,
+                "default": False,
+            },
+            Args.SRC_TYPE: {
+                "type": str,
+                "choices": [SrcTypeArg.AUTO, SrcTypeArg.PATH, SrcTypeArg.URL],
+                "required": False,
+                "default": SrcTypeArg.AUTO,
+            },
+            Args.DEST_TYPE: {
+                "type": str,
+                "choices": [DestTypeArg.NORMAL, DestTypeArg.GLOB_SINGLE],
+                "required": False,
+                "default": DestTypeArg.NORMAL,
+            },
+            # Note: setting mode for links will change the permissions of the source
+            Args.MODE: {
+                "type": str,
+                "required": False,
+                "default": None,
+            },
         }
-    })
+    )
 
     def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
         self._populate_auto_args()
@@ -391,9 +405,11 @@ class CreateAction(Action):
                 result = self.Result.LINK_MODE_CHANGED
 
         message = f"{result.value} {source!r} -> {dest_path!r}"
-        color = (Print.AS_EXPECTED_COLOR
-                 if result in [self.Result.LINK_AS_EXPECTED, self.Result.FILE_AS_EXPECTED]
-                 else Print.SUCCESS_COLOR)
+        color = (
+            Print.AS_EXPECTED_COLOR
+            if result in [self.Result.LINK_AS_EXPECTED, self.Result.FILE_AS_EXPECTED]
+            else Print.SUCCESS_COLOR
+        )
         return message, color, diff
 
     def _execute(self) -> Tuple[str, str, Result, Optional[str]]:
@@ -414,12 +430,16 @@ class CreateAction(Action):
             source = self._source_path()
             with open(source, "r") as fh:
                 source_content = fh.read()
-            Print.v(f"Creating {self._parsed_args[self.Args.TYPE]} of {source} "
-                    f"at {self._parsed_args[self.Args.DEST]}")
+            Print.v(
+                f"Creating {self._parsed_args[self.Args.TYPE]} of {source} "
+                f"at {self._parsed_args[self.Args.DEST]}"
+            )
             if self._parsed_args[self.Args.TYPE] == self.TypeArg.LINK:
                 if self.sudo:
-                    Print.info(f"Warning: sudo option used with symlink, "
-                               "this is not recommended for security reasons")
+                    Print.info(
+                        f"Warning: sudo option used with symlink, "
+                        f"this is not recommended for security reasons"
+                    )
                 result, diff = self._execute_for_link(source, dest_path)
             elif self._parsed_args[self.Args.TYPE] == self.TypeArg.COPY:
                 result, diff = self._execute_for_copy(source, source_content, dest_path)
@@ -431,8 +451,9 @@ class CreateAction(Action):
 
     def _populate_auto_args(self) -> None:
         if self._parsed_args[self.Args.SRC_TYPE] == self.SrcTypeArg.AUTO:
-            if (self._parsed_args[self.Args.SRC].startswith("http://")
-                    or self._parsed_args[self.Args.SRC].startswith("https://")):
+            if self._parsed_args[self.Args.SRC].startswith("http://") or self._parsed_args[
+                self.Args.SRC
+            ].startswith("https://"):
                 self._parsed_args[self.Args.SRC_TYPE] = self.SrcTypeArg.URL
             else:
                 self._parsed_args[self.Args.SRC_TYPE] = self.SrcTypeArg.PATH
@@ -443,15 +464,13 @@ class CreateAction(Action):
                 self._parsed_args[self.Args.TYPE] = self.TypeArg.LINK
 
     def _can_replace(self) -> bool:
-        return (
-            self._parsed_args[self.Args.REPLACE] == self.ForceArg.ALWAYS
-            or (self._parsed_args[self.Args.REPLACE] == self.ForceArg.ALLOW and self.force)
+        return self._parsed_args[self.Args.REPLACE] == self.ForceArg.ALWAYS or (
+            self._parsed_args[self.Args.REPLACE] == self.ForceArg.ALLOW and self.force
         )
 
     def _can_relink(self) -> bool:
-        return (
-            self._parsed_args[self.Args.RELINK] == self.ForceArg.ALWAYS
-            or (self._parsed_args[self.Args.RELINK] == self.ForceArg.ALLOW and self.force)
+        return self._parsed_args[self.Args.RELINK] == self.ForceArg.ALWAYS or (
+            self._parsed_args[self.Args.RELINK] == self.ForceArg.ALLOW and self.force
         )
 
     def _update_permissions(self, file_path: str, mode: Optional[str]) -> bool:
@@ -512,12 +531,16 @@ class CreateAction(Action):
         try:
             os.unlink(link_path)
         except OSError as err:
-            raise self.CreateActionError(f"Failed to remove link: {link_path!r}: {err!s}") from err
+            raise self.CreateActionError(
+                f"Failed to remove link: {link_path!r}: {err!s}"
+            ) from err
 
     def _relink(self, source_path: str, dest_path: str, current_source_path: str) -> None:
         if not self._can_relink():
-            raise self.CreateActionError(f"Link exists with wrong source: {current_source_path!r} "
-                                         f"-> {dest_path!r} instead of {source_path!r}")
+            raise self.CreateActionError(
+                f"Link exists with wrong source: {current_source_path!r} "
+                f"-> {dest_path!r} instead of {source_path!r}"
+            )
         Print.v("Relinking to correct source...")
         if self.dry_run:
             return
@@ -588,8 +611,9 @@ class CreateAction(Action):
         self._create_link(source_path, dest_path)
         return self.Result.NEW_LINK_CREATED, diff
 
-    def _execute_for_copy(self, source_name: str, source_content: str,
-                          dest_path: str) -> Tuple[Result, Optional[str]]:
+    def _execute_for_copy(
+        self, source_name: str, source_content: str, dest_path: str
+    ) -> Tuple[Result, Optional[str]]:
         if os.path.exists(dest_path):
             if os.path.islink(dest_path):
                 diff = self._file_content_diff(source_name, source_content, dest_path)
@@ -627,9 +651,8 @@ class CreateAction(Action):
         """
         source_path = self._absolute_path(self._expanded_path(self._parsed_args[self.Args.SRC]))
         if not os.path.isfile(source_path):
-            source_path_text = (
-                repr(self._parsed_args[self.Args.SRC])
-                + (f" ({source_path!r})" if self._parsed_args[self.Args.SRC] != source_path else "")
+            source_path_text = repr(self._parsed_args[self.Args.SRC]) + (
+                f" ({source_path!r})" if self._parsed_args[self.Args.SRC] != source_path else ""
             )
             raise self.SourceDoesNotExist(f"Source file {source_path_text} not found.")
         return source_path
@@ -640,8 +663,10 @@ class CreateAction(Action):
             return self._absolute_path(expanded_path)
         if self._parsed_args[self.Args.DEST_TYPE] == self.DestTypeArg.GLOB_SINGLE:
             if set(os.path.basename(expanded_path)) & set("*?[]"):
-                raise self.CreateActionError(f"Glob patterns are not yet supported in the file "
-                                             f"name: {self._parsed_args[self.Args.DEST]!r}")
+                raise self.CreateActionError(
+                    "Glob patterns are not yet supported in the file "
+                    f"name: {self._parsed_args[self.Args.DEST]!r}"
+                )
             dest_dir_pattern = os.path.dirname(expanded_path)
             dest_dir_list = glob.glob(dest_dir_pattern)
             if len(dest_dir_list) == 0:
@@ -651,8 +676,9 @@ class CreateAction(Action):
                 )
             if len(dest_dir_list) > 1:
                 raise self.CreateActionError(
-                    f"Multiple matches for {self.Args.DEST_TYPE}='{self.DestTypeArg.GLOB_SINGLE}': "
-                    "{dest_dir_list!r} (dest: {self._parsed_args[self.Args.DEST]!r})"
+                    "Multiple matches for"
+                    f" {self.Args.DEST_TYPE}='{self.DestTypeArg.GLOB_SINGLE}':"
+                    " {dest_dir_list!r} (dest: {self._parsed_args[self.Args.DEST]!r})"
                 )
             dest_path = os.path.join(dest_dir_list[0], os.path.basename(expanded_path))
             return self._absolute_path(dest_path)
@@ -674,31 +700,33 @@ class FileContentAction(Action):
         AFTER = "after"
         BACKUP = "backup"
 
-    args_definition = ArgsDefinition({
-        Args.DEST: {
-            "type": str,
-            "required": True,
-        },
-        Args.CONTENT: {
-            "type": str,
-            "required": True,
-        },
-        Args.REGEX: {
-            "type": str,
-            "required": False,
-            "default": None,
-        },
-        Args.AFTER: {
-            "type": str,
-            "required": False,
-            "default": None,
-        },
-        Args.BACKUP: {
-            "type": bool,
-            "required": False,
-            "default": True,
-        },
-    })
+    args_definition = ArgsDefinition(
+        {
+            Args.DEST: {
+                "type": str,
+                "required": True,
+            },
+            Args.CONTENT: {
+                "type": str,
+                "required": True,
+            },
+            Args.REGEX: {
+                "type": str,
+                "required": False,
+                "default": None,
+            },
+            Args.AFTER: {
+                "type": str,
+                "required": False,
+                "default": None,
+            },
+            Args.BACKUP: {
+                "type": bool,
+                "required": False,
+                "default": True,
+            },
+        }
+    )
 
     def _compile_regex(self, regex: str) -> re.Pattern:
         try:
@@ -718,8 +746,9 @@ class FileContentAction(Action):
             file_content = fh.read()
 
         head, main_content = self._split_on_after_regex(file_content)
-        before_match, after_match, matched = \
-            self._split_around_content_match(main_content, dest_path)
+        before_match, after_match, matched = self._split_around_content_match(
+            main_content, dest_path
+        )
         new_content = head + before_match + self._parsed_args[self.Args.CONTENT] + after_match
         diff: Optional[str] = None
 
@@ -737,8 +766,11 @@ class FileContentAction(Action):
                 with open(dest_path, "w") as fh:
                     fh.write(new_content)
 
-            message = (f"File content updated: {dest_path!r}" if matched
-                       else f"File content added: {dest_path!r}")
+            message = (
+                f"File content updated: {dest_path!r}"
+                if matched
+                else f"File content added: {dest_path!r}"
+            )
             color = Print.SUCCESS_COLOR
         else:
             message = f"File contents already as expected: {dest_path!r}"
@@ -755,8 +787,9 @@ class FileContentAction(Action):
         split_idx = after_matches[-1].end()
         return content[:split_idx], content[split_idx:]
 
-    def _split_around_content_match(self, initial_content: str,
-                                    dest_path: str) -> Tuple[str, str, bool]:
+    def _split_around_content_match(
+        self, initial_content: str, dest_path: str
+    ) -> Tuple[str, str, bool]:
         if self._parsed_args[self.Args.REGEX] is not None:
             Print.vv(f"Using content regex: {self._parsed_args[self.Args.REGEX]}")
             content_regex = self._compile_regex(self._parsed_args[self.Args.REGEX])
@@ -774,7 +807,7 @@ class FileContentAction(Action):
         idx_start = initial_content.rfind(new_content)
         if idx_start == -1:
             return initial_content, "", False
-        return initial_content[:idx_start], initial_content[idx_start+len(new_content):], True
+        return initial_content[:idx_start], initial_content[idx_start + len(new_content) :], True
 
 
 ACTIONS_MAP: Dict[str, Type[Action]] = {
@@ -825,7 +858,7 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
         "--diff",
         "-d",
         action="store_true",
-        help="show the differences in changed files; works great with --dry-run"
+        help="show the differences in changed files; works great with --dry-run",
     )
     parser.add_argument(
         "--force",
@@ -849,8 +882,10 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
 
 def get_config_file_path(args: argparse.Namespace) -> str:
     args_config_file = cast(Optional[str], args.config_file)
-    for path, source in ((args_config_file, "command line arguments"),
-                         (os.environ.get(CONFIG_ENV_VAR), "environment variable")):
+    for path, source in (
+        (args_config_file, "command line arguments"),
+        (os.environ.get(CONFIG_ENV_VAR), "environment variable"),
+    ):
         if path:
             full_path = os.path.abspath(path)
             if not os.path.isfile(full_path):
@@ -874,14 +909,20 @@ def parse_yaml_file(fh: IO[str]) -> Any:
     try:
         result = yaml.safe_load(fh)
     except yaml.YAMLError as exc:
-        Print.failure(f"Error while parsing yaml configuration file {fh.name}:\n{exc}",
-                      file=sys.stderr)
+        Print.failure(
+            f"Error while parsing yaml configuration file {fh.name}:\n{exc}", file=sys.stderr
+        )
         sys.exit(1)
     return result
 
 
-def _parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
-                         show_diff: bool = False, force: bool = False) -> List[Action]:
+def _parse_configuraiton(
+    config: Any,
+    local_dir: str,
+    dry_run: bool = False,
+    show_diff: bool = False,
+    force: bool = False,
+) -> List[Action]:
     if not isinstance(config, list):
         raise ConfigFileError("Invalid configuraiton file format: expected list of actions")
     actions: List[Action] = []
@@ -892,18 +933,29 @@ def _parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
         if action_name not in ACTIONS_MAP:
             raise ConfigFileError(f"Invalid action: {action_name}")
         for action_args in action_args_list:
-            action = ACTIONS_MAP[action_name](action_args, local_dir=local_dir, dry_run=dry_run,
-                                              show_diff=show_diff, force=force)
+            action = ACTIONS_MAP[action_name](
+                action_args,
+                local_dir=local_dir,
+                dry_run=dry_run,
+                show_diff=show_diff,
+                force=force,
+            )
             actions.append(action)
 
     return actions
 
 
-def parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
-                        show_diff: bool = False, force: bool = False) -> List[Action]:
+def parse_configuraiton(
+    config: Any,
+    local_dir: str,
+    dry_run: bool = False,
+    show_diff: bool = False,
+    force: bool = False,
+) -> List[Action]:
     try:
-        return _parse_configuraiton(config, local_dir, dry_run=dry_run, show_diff=show_diff,
-                                    force=force)
+        return _parse_configuraiton(
+            config, local_dir, dry_run=dry_run, show_diff=show_diff, force=force
+        )
     except (ConfigFileError, ArgsDefinition.InvalidArguments) as e:
         Print.failure(f"Configuration file error: {e}")
         sys.exit(1)
@@ -912,13 +964,19 @@ def parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
 def execute_dotfilelink_with_sudo(config_path: str) -> int:
     colors = "always" if Print.COLORS_ENABLED else "never"
     command = [
-        "sudo", sys.executable, __file__,
+        "sudo",
+        sys.executable,
+        __file__,
         *sys.argv[1:],
-        "--color", colors,
-        "--config-file", config_path,
+        "--color",
+        colors,
+        "--config-file",
+        config_path,
         "--sudo-only",
     ]
-    process = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(
+        command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
     assert process.stdout is not None and process.stderr is not None
 
     return_code = None
@@ -936,12 +994,12 @@ def execute_dotfilelink_with_sudo(config_path: str) -> int:
 
 def _enable_cache(timeout_minutes: int) -> None:
     requests_cache.install_cache(
-        cache_name='dotfilelink_cache',
+        cache_name="dotfilelink_cache",
         expire_after=timedelta(minutes=timeout_minutes),
         use_cache_dir=True,
         cache_control=False,
         allowable_codes=[200],
-        allowable_methods=['GET'],
+        allowable_methods=["GET"],
         stale_if_error=False,
     )
 
@@ -971,8 +1029,10 @@ def main() -> None:
         if args.allow_root:
             Print.info("Warning: running as root")
         else:
-            Print.info("Warning: Running dotfilelinks with sudo can result in files with "
-                       "incorrect permissions or paths. Use --allow-root if you are sure.")
+            Print.info(
+                "Warning: Running dotfilelinks with sudo can result in files with "
+                "incorrect permissions or paths. Use --allow-root if you are sure."
+            )
             sys.exit(2)
 
     config_file_path = get_config_file_path(args)
@@ -980,8 +1040,13 @@ def main() -> None:
         config = parse_yaml_file(fh)
     # Use the configuration file local directory when resolving paths
     config_local_dir = os.path.dirname(config_file_path)
-    actions = parse_configuraiton(config, local_dir=config_local_dir, dry_run=args.dry_run,
-                                  show_diff=args.diff, force=args.force)
+    actions = parse_configuraiton(
+        config,
+        local_dir=config_local_dir,
+        dry_run=args.dry_run,
+        show_diff=args.diff,
+        force=args.force,
+    )
     non_sudo_actions = [action for action in actions if not action.sudo]
     sudo_actions = [action for action in actions if action.sudo]
 
@@ -991,8 +1056,10 @@ def main() -> None:
     else:
         # If we are root execute all actions like normal
         actions_list = actions if am_root else non_sudo_actions
-        Print.v(f"Executing {len(actions)} actions, sudo: {len(sudo_actions)}, "
-                f"non-sudo: {len(non_sudo_actions)}.")
+        Print.v(
+            f"Executing {len(actions)} actions, sudo: {len(sudo_actions)}, "
+            f"non-sudo: {len(non_sudo_actions)}."
+        )
 
     initial_task_number = 1
     success = True
