@@ -17,22 +17,21 @@ import requests
 import requests_cache
 
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 
 DEFAULT_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
 DEFAULT_CONFIG = os.path.expanduser(DEFAULT_CONFIG_NOTEXPANDED)
 ALTERNATIVE_CONFIG = os.path.expanduser("~/dotfiles/config.yaml")
-
+DEFAULT_REQUESTS_CACHE_TIMEOUT_MINUTES = 10
 CONFIG_ENV_VAR = "DOTFILELINK_CONFIG"
-
-REQUESTS_CACHE_TIMEOUT_MINUTES = 10
+CACHE_TIMEOUT_ENV_VAR = "DOTFILELINK_CACHE_TIMEOUT"
 
 
 class Print:
     # Set by main()
     VERBOSITY_LEVEL = 0
-    COLORS_ENABLED = False
+    COLORS_ENABLED: bool = False
 
     # If flush is not used, output from the subprocess sudo execution comes
     # at once when the process finishes
@@ -840,7 +839,10 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
         "--config-file",
         "-c",
         nargs="?",
-        help=f"dotfiles yaml configuration file; default is {DEFAULT_CONFIG_NOTEXPANDED}",
+        help=(
+            f"dotfiles yaml configuration file; default is {DEFAULT_CONFIG_NOTEXPANDED} and can"
+            f" also be specified via environment variable {CONFIG_ENV_VAR}"
+        ),
     )
     parser.add_argument(
         "--color",
@@ -872,9 +874,15 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
         help="allow execution as root",
     )
     parser.add_argument(
-        "--no-cache",
-        action="store_true",
-        help="disable request caching",
+        "--cache-timeout",
+        "-t",
+        type=int,
+        default=(os.getenv(CACHE_TIMEOUT_ENV_VAR, DEFAULT_REQUESTS_CACHE_TIMEOUT_MINUTES)),
+        help=(
+            "cache timeout in minutes, set to 0 to disable; default is"
+            f" {DEFAULT_REQUESTS_CACHE_TIMEOUT_MINUTES} and can also be set via environment"
+            f" variable {CACHE_TIMEOUT_ENV_VAR}"
+        ),
     )
     args = parser.parse_args(args_list)
     return args
@@ -993,6 +1001,7 @@ def execute_dotfilelink_with_sudo(config_path: str) -> int:
 
 
 def _enable_cache(timeout_minutes: int) -> None:
+    Print.v(f"Enabling request cache with {timeout_minutes} minute timeout.")
     requests_cache.install_cache(
         cache_name="dotfilelink_cache",
         expire_after=timedelta(minutes=timeout_minutes),
@@ -1018,8 +1027,8 @@ def main() -> None:
         Print.info(f"dotfilelink v{__version__}")
         sys.exit(0)
 
-    if not args.no_cache:
-        _enable_cache(REQUESTS_CACHE_TIMEOUT_MINUTES)
+    if args.cache_timeout != 0:
+        _enable_cache(args.cache_timeout)
 
     am_root = os.geteuid() == 0
     if args.sudo_only and not am_root:
