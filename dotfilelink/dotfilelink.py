@@ -10,14 +10,14 @@ import subprocess
 import difflib
 from enum import Enum
 from datetime import datetime, timedelta
-from typing import List, Dict, Tuple, IO, Any, Optional, Type, cast
+from typing import IO, Any, Type, cast
 
 import yaml
 import requests
 import requests_cache
 
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 
 DEFAULT_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
@@ -150,10 +150,10 @@ class ArgsDefinition:
     class InvalidArguments(Exception):
         pass
 
-    def __init__(self, definition: Dict):
+    def __init__(self, definition: dict):
         self.definition = definition
 
-    def parse(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def parse(self, args: dict[str, Any]) -> dict[str, Any]:
         parsed_args = {}
 
         for arg_name, value in args.items():
@@ -189,7 +189,7 @@ class Action:
     An action to be executed.
     """
 
-    args_definition: Optional[ArgsDefinition] = None
+    args_definition: ArgsDefinition | None = None
 
     class ActionError(Exception):
         pass
@@ -199,7 +199,7 @@ class Action:
 
     def __init__(
         self,
-        args: Dict[str, Any],
+        args: dict[str, Any],
         local_dir: str,
         dry_run: bool = False,
         show_diff: bool = False,
@@ -214,22 +214,20 @@ class Action:
         self.force = force
         self._parsed_args = self.args_definition.parse(args)
 
-    def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
+    def execute(self) -> tuple[str, Print.ANSI_COLOR, str | None]:
         """
         Execute the action.
         """
         raise NotImplementedError("Abstract method")
 
-    def _file_diff(self, src_path: str, dest_path: str) -> Optional[str]:
+    def _file_diff(self, src_path: str, dest_path: str) -> str | None:
         if not self.show_diff:
             return None
         with open(src_path, "r") as fd:
             src_content = fd.read()
         return self._file_content_diff(src_path, src_content, dest_path)
 
-    def _file_content_diff(
-        self, src_name: str, src_content: str, dest_path: str
-    ) -> Optional[str]:
+    def _file_content_diff(self, src_name: str, src_content: str, dest_path: str) -> str | None:
         if not self.show_diff:
             return None
         Print.vv(f"Generating diff between {src_name!r} and {dest_path!r}.")
@@ -252,7 +250,7 @@ class Action:
 
     @staticmethod
     def _lines_diff(
-        old_lines: List[str], new_lines: List[str], old_path: str, new_path: str
+        old_lines: list[str], new_lines: list[str], old_path: str, new_path: str
     ) -> str:
         diff = ""
         for diff_line in difflib.unified_diff(old_lines, new_lines, old_path, new_path):
@@ -393,7 +391,7 @@ class CreateAction(Action):
         }
     )
 
-    def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
+    def execute(self) -> tuple[str, Print.ANSI_COLOR, str | None]:
         self._populate_auto_args()
         source, dest_path, result, diff = self._execute()
 
@@ -411,7 +409,7 @@ class CreateAction(Action):
         )
         return message, color, diff
 
-    def _execute(self) -> Tuple[str, str, Result, Optional[str]]:
+    def _execute(self) -> tuple[str, str, Result, str | None]:
         dest_path = self._dest_path()
         if self._parsed_args[self.Args.SRC_TYPE] == self.SrcTypeArg.URL:
             source: str = self._parsed_args[self.Args.SRC]
@@ -472,7 +470,7 @@ class CreateAction(Action):
             self._parsed_args[self.Args.RELINK] == self.ForceArg.ALLOW and self.force
         )
 
-    def _update_permissions(self, file_path: str, mode: Optional[str]) -> bool:
+    def _update_permissions(self, file_path: str, mode: str | None) -> bool:
         """
         Update permissions of given file if needed and return whether
         any change was made.
@@ -582,7 +580,7 @@ class CreateAction(Action):
             else:
                 raise self.CreateActionError(f"Directory does not exist: {dest_path!r}")
 
-    def _execute_for_link(self, source_path: str, dest_path: str) -> Tuple[Result, Optional[str]]:
+    def _execute_for_link(self, source_path: str, dest_path: str) -> tuple[Result, str | None]:
         if os.path.exists(dest_path):
             if os.path.islink(dest_path):
                 link_source = os.readlink(dest_path)
@@ -612,7 +610,7 @@ class CreateAction(Action):
 
     def _execute_for_copy(
         self, source_name: str, source_content: str, dest_path: str
-    ) -> Tuple[Result, Optional[str]]:
+    ) -> tuple[Result, str | None]:
         if os.path.exists(dest_path):
             if os.path.islink(dest_path):
                 diff = self._file_content_diff(source_name, source_content, dest_path)
@@ -734,7 +732,7 @@ class FileContentAction(Action):
             Print.v(f"Compiling regular expression {regex!r} failed with error: {err!s}")
             raise self.FileContentActionError("Invalid regular expression {regex!r}: {err!s}")
 
-    def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
+    def execute(self) -> tuple[str, Print.ANSI_COLOR, str | None]:
         dest_path = self._expanded_path(self._parsed_args[self.Args.DEST])
         if not os.path.exists(dest_path):
             raise self.FileContentActionError(f"Destination file does not exist: {dest_path}")
@@ -749,7 +747,7 @@ class FileContentAction(Action):
             main_content, dest_path
         )
         new_content = head + before_match + self._parsed_args[self.Args.CONTENT] + after_match
-        diff: Optional[str] = None
+        diff: str | None = None
 
         if file_content != new_content:
             if self.show_diff:
@@ -776,7 +774,7 @@ class FileContentAction(Action):
             color = Print.AS_EXPECTED_COLOR
         return message, color, diff
 
-    def _split_on_after_regex(self, content: str) -> Tuple[str, str]:
+    def _split_on_after_regex(self, content: str) -> tuple[str, str]:
         if self._parsed_args[self.Args.AFTER] is None:
             return "", content
         after_regex = self._compile_regex(self._parsed_args[self.Args.AFTER])
@@ -788,7 +786,7 @@ class FileContentAction(Action):
 
     def _split_around_content_match(
         self, initial_content: str, dest_path: str
-    ) -> Tuple[str, str, bool]:
+    ) -> tuple[str, str, bool]:
         if self._parsed_args[self.Args.REGEX] is not None:
             Print.vv(f"Using content regex: {self._parsed_args[self.Args.REGEX]}")
             content_regex = self._compile_regex(self._parsed_args[self.Args.REGEX])
@@ -809,13 +807,13 @@ class FileContentAction(Action):
         return initial_content[:idx_start], initial_content[idx_start + len(new_content) :], True
 
 
-ACTIONS_MAP: Dict[str, Type[Action]] = {
+ACTIONS_MAP: dict[str, Type[Action]] = {
     "create": CreateAction,
     "filecontent": FileContentAction,
 }
 
 
-def parse_args(args_list: List[str]) -> argparse.Namespace:
+def parse_args(args_list: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--version",
@@ -889,7 +887,7 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
 
 
 def get_config_file_path(args: argparse.Namespace) -> str:
-    args_config_file = cast(Optional[str], args.config_file)
+    args_config_file = cast(str | None, args.config_file)
     for path, source in (
         (args_config_file, "command line arguments"),
         (os.environ.get(CONFIG_ENV_VAR), "environment variable"),
@@ -930,10 +928,10 @@ def _parse_configuraiton(
     dry_run: bool = False,
     show_diff: bool = False,
     force: bool = False,
-) -> List[Action]:
+) -> list[Action]:
     if not isinstance(config, list):
         raise ConfigFileError("Invalid configuraiton file format: expected list of actions")
-    actions: List[Action] = []
+    actions: list[Action] = []
     for action_dict in config:
         if len(action_dict) != 1:
             raise ConfigFileError(f"Single action name expected, got: {list(action_dict.keys())}")
@@ -959,7 +957,7 @@ def parse_configuraiton(
     dry_run: bool = False,
     show_diff: bool = False,
     force: bool = False,
-) -> List[Action]:
+) -> list[Action]:
     try:
         return _parse_configuraiton(
             config, local_dir, dry_run=dry_run, show_diff=show_diff, force=force
