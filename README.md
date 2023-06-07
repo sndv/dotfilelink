@@ -1,6 +1,7 @@
 # Dotfilelink
 
-A tool for installing dotfiles.
+A simple tool for installing dotfiles that supports changes to files requiring
+root access.
 
 ## Install
 
@@ -50,6 +51,17 @@ For documentation of all actions and their options see [ACTIONS.md](docs/ACTIONS
 ```yaml
 ---
 
+# Dotfiles directory for this example:
+#
+# dotfiles
+# ├── aliases
+# ├── firefox.user.js
+# ├── gitconfig
+# ├── global
+# │   └── config.conf
+# └── ssh-config
+
+
 # Create symlink ~/.gitconfig pointing to gitconfig and ~/.vimrc pointing
 # to vimrc; source paths are relative to the config file location.
 # Environment variables and '~' can be used in the paths.
@@ -95,7 +107,7 @@ For documentation of all actions and their options see [ACTIONS.md](docs/ACTIONS
 # The 'sudo' option can be used to execute an action as root, allowing it to
 # change files that only root has write access to.
 - create:
-  - src: config.conf
+  - src: global/config.conf
     dest: /etc/config.conf
     type: copy
     sudo: yes
