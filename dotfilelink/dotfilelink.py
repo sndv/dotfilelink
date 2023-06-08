@@ -26,6 +26,7 @@ ALTERNATIVE_CONFIG = os.path.expanduser("~/dotfiles/config.yaml")
 DEFAULT_REQUESTS_CACHE_TIMEOUT_MINUTES = 10
 CONFIG_ENV_VAR = "DOTFILELINK_CONFIG"
 CACHE_TIMEOUT_ENV_VAR = "DOTFILELINK_CACHE_TIMEOUT"
+BACKUPS_BASE_DIR = os.path.expanduser("~/.cache/dotfilelink/")
 
 
 class Print:
@@ -204,6 +205,7 @@ class Action:
         dry_run: bool = False,
         show_diff: bool = False,
         force: bool = False,
+        local_backup: bool = False,
     ):
         if not self.args_definition:
             raise NotImplementedError("Abstract class")
@@ -212,6 +214,7 @@ class Action:
         self.dry_run = dry_run
         self.show_diff = show_diff
         self.force = force
+        self.local_backup = local_backup
         self._parsed_args = self.args_definition.parse(args)
 
     def execute(self) -> tuple[str, Print.ANSI_COLOR, str | None]:
@@ -260,8 +263,12 @@ class Action:
         return diff
 
     def _backup_file(self, path: str) -> None:
-        backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
-        backup_file_name = f"{path}.{backup_suffix}"
+        timestamp_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+        if self.local_backup:
+            backup_file_name = f"{path}.{timestamp_suffix}"
+        else:
+            clean_path = path.replace("/", "_").strip("_")
+            backup_file_name = os.path.join(BACKUPS_BASE_DIR, f"{clean_path}.{timestamp_suffix}")
         Print.v(f"Backing up {path!r} as {backup_file_name!r}...")
         if self.dry_run:
             return
@@ -564,7 +571,7 @@ class CreateAction(Action):
         if self._parsed_args[self.Args.BACKUP]:
             self._backup_file(dest_path)
         elif not self.dry_run:
-            # Backup will rename the file, so remove only if not backed up
+            # Backup will move or rename the file, so remove only if not backed up
             try:
                 os.remove(dest_path)
             except OSError as err:
@@ -882,6 +889,11 @@ def parse_args(args_list: list[str]) -> argparse.Namespace:
             f" variable {CACHE_TIMEOUT_ENV_VAR}"
         ),
     )
+    parser.add_argument(
+        "--local-backup",
+        action="store_true",
+        help="backup files locally instead of in ~/.cache/",
+    )
     args = parser.parse_args(args_list)
     return args
 
@@ -928,6 +940,7 @@ def _parse_configuraiton(
     dry_run: bool = False,
     show_diff: bool = False,
     force: bool = False,
+    local_backup: bool = False,
 ) -> list[Action]:
     if not isinstance(config, list):
         raise ConfigFileError("Invalid configuraiton file format: expected list of actions")
@@ -945,6 +958,7 @@ def _parse_configuraiton(
                 dry_run=dry_run,
                 show_diff=show_diff,
                 force=force,
+                local_backup=local_backup,
             )
             actions.append(action)
 
@@ -957,10 +971,16 @@ def parse_configuraiton(
     dry_run: bool = False,
     show_diff: bool = False,
     force: bool = False,
+    local_backup: bool = False,
 ) -> list[Action]:
     try:
         return _parse_configuraiton(
-            config, local_dir, dry_run=dry_run, show_diff=show_diff, force=force
+            config,
+            local_dir,
+            dry_run=dry_run,
+            show_diff=show_diff,
+            force=force,
+            local_backup=local_backup,
         )
     except (ConfigFileError, ArgsDefinition.InvalidArguments) as e:
         Print.failure(f"Configuration file error: {e}")
@@ -1042,6 +1062,10 @@ def main() -> None:
             )
             sys.exit(2)
 
+    if not args.local_backup and not os.path.isdir(BACKUPS_BASE_DIR):
+        Print.v(f"Creating backups directory: {BACKUPS_BASE_DIR}")
+        os.makedirs(BACKUPS_BASE_DIR)
+
     config_file_path = get_config_file_path(args)
     with open(config_file_path, "r") as fh:
         config = parse_yaml_file(fh)
@@ -1053,6 +1077,7 @@ def main() -> None:
         dry_run=args.dry_run,
         show_diff=args.diff,
         force=args.force,
+        local_backup=args.local_backup,
     )
     non_sudo_actions = [action for action in actions if not action.sudo]
     sudo_actions = [action for action in actions if action.sudo]
