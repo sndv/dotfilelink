@@ -151,11 +151,11 @@ class ArgsDefinition:
     class InvalidArguments(Exception):
         pass
 
-    def __init__(self, definition: dict):
+    def __init__(self, definition: dict[str, dict[str, Any]]):
         self.definition = definition
 
     def parse(self, args: dict[str, Any]) -> dict[str, Any]:
-        parsed_args = {}
+        parsed_args: dict[str, Any] = {}
 
         for arg_name, value in args.items():
             arg_definition = self.definition.get(arg_name)
@@ -732,7 +732,7 @@ class FileContentAction(Action):
         }
     )
 
-    def _compile_regex(self, regex: str) -> re.Pattern:
+    def _compile_regex(self, regex: str) -> re.Pattern[str]:
         try:
             return re.compile(regex, flags=re.MULTILINE)
         except re.error as err:
