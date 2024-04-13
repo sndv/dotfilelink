@@ -338,64 +338,62 @@ class CreateAction(Action):
         ALWAYS = "always"
         NEVER = "never"
 
-    args_definition = ArgsDefinition(
-        {
-            Args.TYPE: {
-                "type": str,
-                "choices": [TypeArg.AUTO, TypeArg.LINK, TypeArg.COPY],
-                "required": False,
-                "default": TypeArg.AUTO,
-            },
-            Args.SRC: {
-                "type": str,
-                "required": True,
-            },
-            Args.DEST: {
-                "type": str,
-                "required": True,
-            },
-            Args.RELINK: {
-                "type": str,
-                "choices": [ForceArg.ALLOW, ForceArg.ALWAYS, ForceArg.NEVER],
-                "required": False,
-                "default": ForceArg.ALLOW,
-            },
-            Args.REPLACE: {
-                "type": str,
-                "choices": [ForceArg.ALLOW, ForceArg.ALWAYS, ForceArg.NEVER],
-                "required": False,
-                "default": ForceArg.ALLOW,
-            },
-            Args.BACKUP: {
-                "type": bool,
-                "required": False,
-                "default": True,
-            },
-            Args.CREATE_DIRS: {
-                "type": bool,
-                "required": False,
-                "default": False,
-            },
-            Args.SRC_TYPE: {
-                "type": str,
-                "choices": [SrcTypeArg.AUTO, SrcTypeArg.PATH, SrcTypeArg.URL],
-                "required": False,
-                "default": SrcTypeArg.AUTO,
-            },
-            Args.DEST_TYPE: {
-                "type": str,
-                "choices": [DestTypeArg.NORMAL, DestTypeArg.GLOB_SINGLE],
-                "required": False,
-                "default": DestTypeArg.NORMAL,
-            },
-            # Note: setting mode for links will change the permissions of the source
-            Args.MODE: {
-                "type": str,
-                "required": False,
-                "default": None,
-            },
-        }
-    )
+    args_definition = ArgsDefinition({
+        Args.TYPE: {
+            "type": str,
+            "choices": [TypeArg.AUTO, TypeArg.LINK, TypeArg.COPY],
+            "required": False,
+            "default": TypeArg.AUTO,
+        },
+        Args.SRC: {
+            "type": str,
+            "required": True,
+        },
+        Args.DEST: {
+            "type": str,
+            "required": True,
+        },
+        Args.RELINK: {
+            "type": str,
+            "choices": [ForceArg.ALLOW, ForceArg.ALWAYS, ForceArg.NEVER],
+            "required": False,
+            "default": ForceArg.ALLOW,
+        },
+        Args.REPLACE: {
+            "type": str,
+            "choices": [ForceArg.ALLOW, ForceArg.ALWAYS, ForceArg.NEVER],
+            "required": False,
+            "default": ForceArg.ALLOW,
+        },
+        Args.BACKUP: {
+            "type": bool,
+            "required": False,
+            "default": True,
+        },
+        Args.CREATE_DIRS: {
+            "type": bool,
+            "required": False,
+            "default": False,
+        },
+        Args.SRC_TYPE: {
+            "type": str,
+            "choices": [SrcTypeArg.AUTO, SrcTypeArg.PATH, SrcTypeArg.URL],
+            "required": False,
+            "default": SrcTypeArg.AUTO,
+        },
+        Args.DEST_TYPE: {
+            "type": str,
+            "choices": [DestTypeArg.NORMAL, DestTypeArg.GLOB_SINGLE],
+            "required": False,
+            "default": DestTypeArg.NORMAL,
+        },
+        # Note: setting mode for links will change the permissions of the source
+        Args.MODE: {
+            "type": str,
+            "required": False,
+            "default": None,
+        },
+    })
 
     def execute(self) -> tuple[str, Print.ANSI_COLOR, str | None]:
         self._populate_auto_args()
@@ -703,33 +701,31 @@ class FileContentAction(Action):
         AFTER = "after"
         BACKUP = "backup"
 
-    args_definition = ArgsDefinition(
-        {
-            Args.DEST: {
-                "type": str,
-                "required": True,
-            },
-            Args.CONTENT: {
-                "type": str,
-                "required": True,
-            },
-            Args.REGEX: {
-                "type": str,
-                "required": False,
-                "default": None,
-            },
-            Args.AFTER: {
-                "type": str,
-                "required": False,
-                "default": None,
-            },
-            Args.BACKUP: {
-                "type": bool,
-                "required": False,
-                "default": True,
-            },
-        }
-    )
+    args_definition = ArgsDefinition({
+        Args.DEST: {
+            "type": str,
+            "required": True,
+        },
+        Args.CONTENT: {
+            "type": str,
+            "required": True,
+        },
+        Args.REGEX: {
+            "type": str,
+            "required": False,
+            "default": None,
+        },
+        Args.AFTER: {
+            "type": str,
+            "required": False,
+            "default": None,
+        },
+        Args.BACKUP: {
+            "type": bool,
+            "required": False,
+            "default": True,
+        },
+    })
 
     def _compile_regex(self, regex: str) -> re.Pattern[str]:
         try:
