@@ -1,21 +1,20 @@
 from __future__ import annotations
 
-import os
-import sys
-import glob
-import re
 import argparse
-import hashlib
-import subprocess
 import difflib
-from enum import Enum
+import glob
+import hashlib
+import os
+import re
+import subprocess
+import sys
 from datetime import datetime, timedelta
+from enum import Enum
 from typing import IO, Any, Type, cast
 
-import yaml
 import requests
 import requests_cache
-
+import yaml
 
 __version__ = "0.3.3"
 
