@@ -10,7 +10,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import IO, Any, Type, cast
+from typing import IO, Any, cast
 
 import requests
 import requests_cache
@@ -809,7 +809,7 @@ class FileContentAction(Action):
         return initial_content[:idx_start], initial_content[idx_start + len(new_content) :], True
 
 
-ACTIONS_MAP: dict[str, Type[Action]] = {
+ACTIONS_MAP: dict[str, type[Action]] = {
     "create": CreateAction,
     "filecontent": FileContentAction,
 }
