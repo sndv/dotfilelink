@@ -943,7 +943,7 @@ def _parse_configuraiton(
     for action_dict in config:
         if len(action_dict) != 1:
             raise ConfigFileError(f"Single action name expected, got: {list(action_dict.keys())}")
-        action_name, action_args_list = list(action_dict.items())[0]
+        action_name, action_args_list = next(action_dict.items())
         if action_name not in ACTIONS_MAP:
             raise ConfigFileError(f"Invalid action: {action_name}")
         for action_args in action_args_list:
