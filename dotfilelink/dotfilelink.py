@@ -281,7 +281,7 @@ class Action:
     def _get_from_url(self, url: str) -> str:
         resp = requests.get(url)
         if resp.status_code != 200:
-            raise self.ActionError(f"GET request failed for: {url!r}")
+            raise self.ActionError(f"GET request failed (got {resp.status_code}) for: {url!r}")
         return resp.text
 
 
