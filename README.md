@@ -58,7 +58,7 @@ For documentation of all actions and their options see [ACTIONS.md](docs/ACTIONS
 # ├── firefox.user.js
 # ├── gitconfig
 # ├── global
-# │   └── config.conf
+# │   └── keyd.conf
 # └── ssh-config
 
 
@@ -97,7 +97,7 @@ For documentation of all actions and their options see [ACTIONS.md](docs/ACTIONS
       content: "[[ -f ~/.aliases ]] && source ~/.aliases\n"
 
 # If the exact destination path is not known, globs can be used. When
-# 'glob_single' is used exactly one match is expected from the glob pattern in
+# 'glob_single' is used, exactly one match is expected from the glob pattern in
 # order to ensure no unwanted changes are made.
 - create:
     - src: firefox.user.js
@@ -107,8 +107,8 @@ For documentation of all actions and their options see [ACTIONS.md](docs/ACTIONS
 # The 'sudo' option can be used to execute an action as root, allowing it to
 # change files that only root has write access to.
 - create:
-  - src: global/config.conf
-    dest: /etc/config.conf
+  - src: global/keyd.conf
+    dest: /etc/keyd/default.conf
     type: copy
     sudo: yes
 ```
