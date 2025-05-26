@@ -16,7 +16,7 @@ import requests
 import requests_cache
 import yaml
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 
 DEFAULT_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
