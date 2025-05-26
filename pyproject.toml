@@ -1,6 +1,6 @@
 [project]
 name = "dotfilelink"
-version = "0.4.2"
+version = "0.4.3"
 description = "A tool for installing dotfiles"
 authors = [{ name = "sndv", email = "sndv@mailbox.org" }]
 readme = "README.md"

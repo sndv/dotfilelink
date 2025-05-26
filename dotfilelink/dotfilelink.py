@@ -60,6 +60,7 @@ class Print:
     SUCCESS_COLOR = ANSI_COLOR.GREEN
     AS_EXPECTED_COLOR = ANSI_COLOR.BLUE
     FAILURE_COLOR = ANSI_COLOR.RED
+    WARNING_COLOR = ANSI_COLOR.YELLOW
 
     @classmethod
     def print_(cls, *args: Any, **kwargs: Any) -> None:
@@ -71,6 +72,10 @@ class Print:
     def info(cls, *args: Any, **kwargs: Any) -> None:
         if cls.VERBOSITY_LEVEL >= 0:
             cls.print_(*args, **kwargs)
+
+    @classmethod
+    def warning(cls, msg: str, **kwargs: Any) -> None:
+        cls.color(msg, color=cls.WARNING_COLOR, **kwargs)
 
     @classmethod
     def v(cls, *args: Any, **kwargs: Any) -> None:
@@ -221,12 +226,36 @@ class Action:
         """
         raise NotImplementedError("Abstract method")
 
+    def _diff(self, src_path: str, dest_path: str) -> str | None:
+        if os.path.isfile(src_path):
+            if os.path.isdir(dest_path):
+                return self._mixed_file_dir_diff(src_path, dest_path)
+            if os.path.isfile(dest_path) or not os.path.exists(dest_path):
+                return self._file_diff(src_path, dest_path)
+            raise RuntimeError("unreachable")
+        if os.path.isdir(src_path):
+            if os.path.isfile(dest_path):
+                return self._mixed_file_dir_diff(src_path, dest_path)
+            if os.path.isdir(dest_path) or not os.path.exists(dest_path):
+                return self._dir_diff(src_path, dest_path)
+        raise RuntimeError("unreachable")
+
     def _file_diff(self, src_path: str, dest_path: str) -> str | None:
         if not self.show_diff:
             return None
         with open(src_path) as fd:
             src_content = fd.read()
         return self._file_content_diff(src_path, src_content, dest_path)
+
+    def _dir_diff(self, src_path: str, dest_path: str) -> str | None:
+        # TODO: implement
+        Print.warning("No diff between directories: not yet implemented")
+        return None
+
+    def _mixed_file_dir_diff(self, src_path: str, dest_path: str) -> str | None:
+        # TODO: implement
+        Print.warning("No diff between file and directory: not yet implemented")
+        return None
 
     def _file_content_diff(self, src_name: str, src_content: str, dest_path: str) -> str | None:
         if not self.show_diff:
@@ -428,20 +457,22 @@ class CreateAction(Action):
                 raise RuntimeError("Unreachable")
         elif self._parsed_args[self.Args.SRC_TYPE] == self.SrcTypeArg.PATH:
             source = self._source_path()
-            with open(source) as fh:
-                source_content = fh.read()
             Print.v(
                 f"Creating {self._parsed_args[self.Args.TYPE]} of {source} "
                 f"at {self._parsed_args[self.Args.DEST]}"
             )
             if self._parsed_args[self.Args.TYPE] == self.TypeArg.LINK:
                 if self.sudo:
-                    Print.info(
+                    Print.warning(
                         "Warning: sudo option used with symlink, "
                         "this is not recommended for security reasons"
                     )
                 result, diff = self._execute_for_link(source, dest_path)
             elif self._parsed_args[self.Args.TYPE] == self.TypeArg.COPY:
+                if os.path.isdir(source):
+                    raise self.CreateActionError(f"Copy of directory not yet supported: {source}")
+                with open(source) as fh:
+                    source_content = fh.read()
                 result, diff = self._execute_for_copy(source, source_content, dest_path)
             else:
                 raise RuntimeError("Unreachable")
@@ -542,8 +573,6 @@ class CreateAction(Action):
                 f"-> {dest_path!r} instead of {source_path!r}"
             )
         Print.v("Relinking to correct source...")
-        if self.dry_run:
-            return
         self._unlink(dest_path)
         self._create_link(source_path, dest_path)
 
@@ -553,8 +582,6 @@ class CreateAction(Action):
                 f"Can't create copy, destination exists as link: {dest_path!r}"
             )
         Print.v("Replacing link with file...")
-        if self.dry_run:
-            return
         self._unlink(dest_path)
         self._create_copy(source_name, source_content, dest_path)
 
@@ -590,18 +617,19 @@ class CreateAction(Action):
                 if link_source == source_path:
                     Print.v("Correct link already exists.")
                     return self.Result.LINK_AS_EXPECTED, None
-                diff = self._file_diff(source_path, dest_path)
+                diff = self._diff(source_path, dest_path)
                 self._relink(source_path, dest_path, link_source)
                 return self.Result.RELINKED, diff
             if os.path.isfile(dest_path):
-                diff = self._file_diff(source_path, dest_path)
+                diff = self._diff(source_path, dest_path)
                 self._prepare_replace_file(dest_path)
                 self._create_link(source_path, dest_path)
                 return self.Result.REPLACED_FILE_WITH_LINK, diff
+            # TODO: support for directory replacement with force?
             raise self.CreateActionError(
                 f"Destination exists but it's not a file or link, not replacing: {dest_path!r}"
             )
-        diff = self._file_diff(source_path, dest_path)
+        diff = self._diff(source_path, dest_path)
         if os.path.islink(dest_path):  # Broken link
             link_source = os.readlink(dest_path)
             Print.v(f"Found broken link {link_source!r} -> {dest_path!r}")
@@ -650,12 +678,12 @@ class CreateAction(Action):
         Ensure that the source file exists and return its absolute path.
         """
         source_path = self._absolute_path(self._expanded_path(self._parsed_args[self.Args.SRC]))
-        if not os.path.isfile(source_path):
-            source_path_text = repr(self._parsed_args[self.Args.SRC]) + (
-                f" ({source_path!r})" if self._parsed_args[self.Args.SRC] != source_path else ""
-            )
-            raise self.SourceDoesNotExist(f"Source file {source_path_text} not found.")
-        return source_path
+        if os.path.isfile(source_path) or os.path.isdir(source_path):
+            return source_path
+        source_path_text = repr(self._parsed_args[self.Args.SRC]) + (
+            f" ({source_path!r})" if self._parsed_args[self.Args.SRC] != source_path else ""
+        )
+        raise self.SourceDoesNotExist(f"Source file or directory {source_path_text} not found.")
 
     def _dest_path(self) -> str:
         expanded_path = self._expanded_path(self._parsed_args[self.Args.DEST])
