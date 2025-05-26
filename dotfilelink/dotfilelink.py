@@ -17,7 +17,6 @@ import requests
 import requests_cache
 import yaml
 
-
 VERSION = importlib.metadata.version("dotfilelink")
 DEFAULT_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
 DEFAULT_CONFIG = os.path.expanduser(DEFAULT_CONFIG_NOTEXPANDED)
@@ -225,7 +224,7 @@ class Action:
     def _file_diff(self, src_path: str, dest_path: str) -> str | None:
         if not self.show_diff:
             return None
-        with open(src_path, "r") as fd:
+        with open(src_path) as fd:
             src_content = fd.read()
         return self._file_content_diff(src_path, src_content, dest_path)
 
@@ -236,7 +235,7 @@ class Action:
         src_lines = src_content.splitlines(keepends=True)
         dest_lines = []
         if os.path.exists(dest_path):
-            with open(dest_path, "r") as fd:
+            with open(dest_path) as fd:
                 dest_lines = fd.read().splitlines(keepends=True)
         return self._lines_diff(dest_lines, src_lines, dest_path, src_name)
 
@@ -429,7 +428,7 @@ class CreateAction(Action):
                 raise RuntimeError("Unreachable")
         elif self._parsed_args[self.Args.SRC_TYPE] == self.SrcTypeArg.PATH:
             source = self._source_path()
-            with open(source, "r") as fh:
+            with open(source) as fh:
                 source_content = fh.read()
             Print.v(
                 f"Creating {self._parsed_args[self.Args.TYPE]} of {source} "
@@ -438,8 +437,8 @@ class CreateAction(Action):
             if self._parsed_args[self.Args.TYPE] == self.TypeArg.LINK:
                 if self.sudo:
                     Print.info(
-                        f"Warning: sudo option used with symlink, "
-                        f"this is not recommended for security reasons"
+                        "Warning: sudo option used with symlink, "
+                        "this is not recommended for security reasons"
                     )
                 result, diff = self._execute_for_link(source, dest_path)
             elif self._parsed_args[self.Args.TYPE] == self.TypeArg.COPY:
@@ -732,7 +731,9 @@ class FileContentAction(Action):
             return re.compile(regex, flags=re.MULTILINE)
         except re.error as err:
             Print.v(f"Compiling regular expression {regex!r} failed with error: {err!s}")
-            raise self.FileContentActionError("Invalid regular expression {regex!r}: {err!s}")
+            raise self.FileContentActionError(
+                "Invalid regular expression {regex!r}: {err!s}"
+            ) from err
 
     def execute(self) -> tuple[str, Print.ANSI_COLOR, str | None]:
         dest_path = self._expanded_path(self._parsed_args[self.Args.DEST])
@@ -741,7 +742,7 @@ class FileContentAction(Action):
         if not os.path.isfile(dest_path):
             raise self.FileContentActionError(f"Destination path is not a file: {dest_path}")
 
-        with open(dest_path, "r") as fh:
+        with open(dest_path) as fh:
             file_content = fh.read()
 
         head, main_content = self._split_on_after_regex(file_content)
@@ -1062,7 +1063,7 @@ def main() -> None:
         os.makedirs(BACKUPS_BASE_DIR)
 
     config_file_path = get_config_file_path(args)
-    with open(config_file_path, "r") as fh:
+    with open(config_file_path) as fh:
         config = parse_yaml_file(fh)
     # Use the configuration file local directory when resolving paths
     config_local_dir = os.path.dirname(config_file_path)

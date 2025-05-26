@@ -33,3 +33,13 @@ line-length = 98
 preview = true
 quote-style = "double"
 line-ending = "lf"
+
+[tool.ruff.lint]
+select = [
+    "E", # pycodestyle errors
+    "F", # pyflakes
+    "UP", # pyupgrade
+    "B", # flake8-bugbear
+    "SIM", # flake8-simplify
+    "I", # isort
+]
