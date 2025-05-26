@@ -4,6 +4,7 @@ import argparse
 import difflib
 import glob
 import hashlib
+import importlib.metadata
 import os
 import re
 import subprocess
@@ -16,9 +17,8 @@ import requests
 import requests_cache
 import yaml
 
-__version__ = "0.4.1"
 
-
+VERSION = importlib.metadata.version("dotfilelink")
 DEFAULT_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
 DEFAULT_CONFIG = os.path.expanduser(DEFAULT_CONFIG_NOTEXPANDED)
 ALTERNATIVE_CONFIG = os.path.expanduser("~/dotfiles/config.yaml")
@@ -943,7 +943,7 @@ def _parse_configuraiton(
     for action_dict in config:
         if len(action_dict) != 1:
             raise ConfigFileError(f"Single action name expected, got: {list(action_dict.keys())}")
-        action_name, action_args_list = next(action_dict.items())
+        action_name, action_args_list = next(iter(action_dict.items()))
         if action_name not in ACTIONS_MAP:
             raise ConfigFileError(f"Invalid action: {action_name}")
         for action_args in action_args_list:
@@ -1037,7 +1037,7 @@ def main() -> None:
         Print.COLORS_ENABLED = False
 
     if args.version:
-        Print.info(f"dotfilelink v{__version__}")
+        Print.info(f"dotfilelink v{VERSION}")
         sys.exit(0)
 
     if args.cache_timeout != 0:
