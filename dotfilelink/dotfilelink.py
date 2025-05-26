@@ -248,12 +248,25 @@ class Action:
         return self._file_content_diff(src_path, src_content, dest_path)
 
     def _dir_diff(self, src_path: str, dest_path: str) -> str | None:
-        # TODO: implement
-        Print.warning("No diff between directories: not yet implemented")
-        return None
+        def dir_tree(root_dir: str, prefix: str = "") -> list[str]:
+            tree: list[str] = []
+            entries = sorted(os.listdir(root_dir))
+            for index, entry in enumerate(entries):
+                path = os.path.join(root_dir, entry)
+                connector = "└── " if index + 1 == len(entries) else "├── "
+                tree.append(prefix + connector + entry + "\n")
+                if os.path.isdir(path):
+                    extension = "    " if index + 1 == len(entries) else "│   "
+                    tree.extend(dir_tree(path, prefix + extension))
+            return tree
+
+        src_lines = [f"{os.path.basename(src_path)}/\n", *dir_tree(src_path)]
+        dest_lines = []
+        if os.path.exists(dest_path):
+            dest_lines = [f"{os.path.basename(dest_path)}/\n", *dir_tree(dest_path)]
+        return self._lines_diff(dest_lines, src_lines, dest_path, src_path)
 
     def _mixed_file_dir_diff(self, src_path: str, dest_path: str) -> str | None:
-        # TODO: implement
         Print.warning("No diff between file and directory: not yet implemented")
         return None
 
