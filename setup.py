@@ -29,13 +29,13 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
     ],
     packages=["dotfilelink"],
-    python_requires=">=3.8",
+    python_requires=">=3.10",
     install_requires=[
-        "PyYAML>=5.4",
-        "requests>=2.25.0",
-        "requests-cache>=0.9.4",
+        "PyYAML>=6.0",
+        "requests>=2.29.0",
+        "requests-cache>=1.0.1",
     ],
-    entry_points = {
+    entry_points={
         "console_scripts": [
             "dotfilelink = dotfilelink.dotfilelink:main",
         ],

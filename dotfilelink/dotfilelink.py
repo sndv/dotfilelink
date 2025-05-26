@@ -1,40 +1,37 @@
-
 from __future__ import annotations
 
-import os
-import sys
-import glob
-import re
 import argparse
-import hashlib
-import subprocess
 import difflib
-from enum import Enum
+import glob
+import hashlib
+import os
+import re
+import subprocess
+import sys
 from datetime import datetime, timedelta
-from typing import List, Dict, Tuple, IO, Any, Optional, Type, cast
+from enum import Enum
+from typing import IO, Any, cast
 
-import yaml
 import requests
 import requests_cache
+import yaml
 
-
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 
 DEFAULT_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
 DEFAULT_CONFIG = os.path.expanduser(DEFAULT_CONFIG_NOTEXPANDED)
 ALTERNATIVE_CONFIG = os.path.expanduser("~/dotfiles/config.yaml")
-
+DEFAULT_REQUESTS_CACHE_TIMEOUT_MINUTES = 10
 CONFIG_ENV_VAR = "DOTFILELINK_CONFIG"
-
-REQUESTS_CACHE_TIMEOUT_MINUTES = 10
+CACHE_TIMEOUT_ENV_VAR = "DOTFILELINK_CACHE_TIMEOUT"
+BACKUPS_BASE_DIR = os.path.expanduser("~/.cache/dotfilelink/")
 
 
 class Print:
-
     # Set by main()
     VERBOSITY_LEVEL = 0
-    COLORS_ENABLED = False
+    COLORS_ENABLED: bool = False
 
     # If flush is not used, output from the subprocess sudo execution comes
     # at once when the process finishes
@@ -70,7 +67,6 @@ class Print:
         if cls.ALWAYS_FLUSH:
             kwargs["flush"] = True
         print(*args, **kwargs)
-
 
     @classmethod
     def info(cls, *args: Any, **kwargs: Any) -> None:
@@ -113,11 +109,17 @@ class Print:
             diff_lines_color = diff_lines[:2]
             for line in diff_lines[2:]:
                 if line.startswith("@"):
-                    diff_lines_color.append(f"{cls.ANSI_COLOR.CYAN.value}{line}{cls.ANSI_COLOR.END.value}")
+                    diff_lines_color.append(
+                        f"{cls.ANSI_COLOR.CYAN.value}{line}{cls.ANSI_COLOR.END.value}"
+                    )
                 elif line.startswith("-"):
-                    diff_lines_color.append(f"{cls.ANSI_COLOR.RED.value}{line}{cls.ANSI_COLOR.END.value}")
+                    diff_lines_color.append(
+                        f"{cls.ANSI_COLOR.RED.value}{line}{cls.ANSI_COLOR.END.value}"
+                    )
                 elif line.startswith("+"):
-                    diff_lines_color.append(f"{cls.ANSI_COLOR.GREEN.value}{line}{cls.ANSI_COLOR.END.value}")
+                    diff_lines_color.append(
+                        f"{cls.ANSI_COLOR.GREEN.value}{line}{cls.ANSI_COLOR.END.value}"
+                    )
                 else:
                     diff_lines_color.append(line)
             diff = "\n".join(diff_lines_color) + "\n"
@@ -145,15 +147,14 @@ class ConfigFileError(Exception):
 
 
 class ArgsDefinition:
-
     class InvalidArguments(Exception):
         pass
 
-    def __init__(self, definition: Dict):
+    def __init__(self, definition: dict[str, dict[str, Any]]):
         self.definition = definition
 
-    def parse(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        parsed_args = {}
+    def parse(self, args: dict[str, Any]) -> dict[str, Any]:
+        parsed_args: dict[str, Any] = {}
 
         for arg_name, value in args.items():
             arg_definition = self.definition.get(arg_name)
@@ -163,7 +164,8 @@ class ArgsDefinition:
             if not isinstance(value, expected_type):
                 raise self.InvalidArguments(
                     f"Argument {arg_name!r} expects type {expected_type.__name__!r} but got "
-                    f"{type(value).__name__!r} instead (value: {value!r})")
+                    f"{type(value).__name__!r} instead (value: {value!r})"
+                )
             if "choices" in arg_definition and value not in arg_definition["choices"]:
                 raise self.InvalidArguments(
                     f"Value of {arg_name!r} must be one of {arg_definition['choices']}, "
@@ -187,7 +189,7 @@ class Action:
     An action to be executed.
     """
 
-    args_definition: Optional[ArgsDefinition] = None
+    args_definition: ArgsDefinition | None = None
 
     class ActionError(Exception):
         pass
@@ -195,8 +197,15 @@ class Action:
     class SourceDoesNotExist(ActionError):
         pass
 
-    def __init__(self, args: Dict[str, Any], local_dir: str, dry_run: bool = False,
-                 show_diff: bool = False, force: bool = False):
+    def __init__(
+        self,
+        args: dict[str, Any],
+        local_dir: str,
+        dry_run: bool = False,
+        show_diff: bool = False,
+        force: bool = False,
+        local_backup: bool = False,
+    ):
         if not self.args_definition:
             raise NotImplementedError("Abstract class")
         self.sudo: bool = args.pop("sudo", False)
@@ -204,22 +213,23 @@ class Action:
         self.dry_run = dry_run
         self.show_diff = show_diff
         self.force = force
+        self.local_backup = local_backup
         self._parsed_args = self.args_definition.parse(args)
 
-    def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
+    def execute(self) -> tuple[str, Print.ANSI_COLOR, str | None]:
         """
         Execute the action.
         """
         raise NotImplementedError("Abstract method")
 
-    def _file_diff(self, src_path: str, dest_path: str) -> Optional[str]:
+    def _file_diff(self, src_path: str, dest_path: str) -> str | None:
         if not self.show_diff:
             return None
         with open(src_path, "r") as fd:
             src_content = fd.read()
         return self._file_content_diff(src_path, src_content, dest_path)
 
-    def _file_content_diff(self, src_name: str, src_content: str, dest_path: str) -> Optional[str]:
+    def _file_content_diff(self, src_name: str, src_content: str, dest_path: str) -> str | None:
         if not self.show_diff:
             return None
         Print.vv(f"Generating diff between {src_name!r} and {dest_path!r}.")
@@ -241,8 +251,9 @@ class Action:
         return expanded_path
 
     @staticmethod
-    def _lines_diff(old_lines: List[str], new_lines: List[str],
-                    old_path: str, new_path: str) -> str:
+    def _lines_diff(
+        old_lines: list[str], new_lines: list[str], old_path: str, new_path: str
+    ) -> str:
         diff = ""
         for diff_line in difflib.unified_diff(old_lines, new_lines, old_path, new_path):
             diff += diff_line
@@ -251,8 +262,12 @@ class Action:
         return diff
 
     def _backup_file(self, path: str) -> None:
-        backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
-        backup_file_name = f"{path}.{backup_suffix}"
+        timestamp_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+        if self.local_backup:
+            backup_file_name = f"{path}.{timestamp_suffix}"
+        else:
+            clean_path = path.replace("/", "_").strip("_")
+            backup_file_name = os.path.join(BACKUPS_BASE_DIR, f"{clean_path}.{timestamp_suffix}")
         Print.v(f"Backing up {path!r} as {backup_file_name!r}...")
         if self.dry_run:
             return
@@ -377,10 +392,10 @@ class CreateAction(Action):
             "type": str,
             "required": False,
             "default": None,
-        }
+        },
     })
 
-    def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
+    def execute(self) -> tuple[str, Print.ANSI_COLOR, str | None]:
         self._populate_auto_args()
         source, dest_path, result, diff = self._execute()
 
@@ -391,12 +406,14 @@ class CreateAction(Action):
                 result = self.Result.LINK_MODE_CHANGED
 
         message = f"{result.value} {source!r} -> {dest_path!r}"
-        color = (Print.AS_EXPECTED_COLOR
-                 if result in [self.Result.LINK_AS_EXPECTED, self.Result.FILE_AS_EXPECTED]
-                 else Print.SUCCESS_COLOR)
+        color = (
+            Print.AS_EXPECTED_COLOR
+            if result in [self.Result.LINK_AS_EXPECTED, self.Result.FILE_AS_EXPECTED]
+            else Print.SUCCESS_COLOR
+        )
         return message, color, diff
 
-    def _execute(self) -> Tuple[str, str, Result, Optional[str]]:
+    def _execute(self) -> tuple[str, str, Result, str | None]:
         dest_path = self._dest_path()
         if self._parsed_args[self.Args.SRC_TYPE] == self.SrcTypeArg.URL:
             source: str = self._parsed_args[self.Args.SRC]
@@ -414,12 +431,16 @@ class CreateAction(Action):
             source = self._source_path()
             with open(source, "r") as fh:
                 source_content = fh.read()
-            Print.v(f"Creating {self._parsed_args[self.Args.TYPE]} of {source} "
-                    f"at {self._parsed_args[self.Args.DEST]}")
+            Print.v(
+                f"Creating {self._parsed_args[self.Args.TYPE]} of {source} "
+                f"at {self._parsed_args[self.Args.DEST]}"
+            )
             if self._parsed_args[self.Args.TYPE] == self.TypeArg.LINK:
                 if self.sudo:
-                    Print.info(f"Warning: sudo option used with symlink, "
-                               "this is not recommended for security reasons")
+                    Print.info(
+                        f"Warning: sudo option used with symlink, "
+                        f"this is not recommended for security reasons"
+                    )
                 result, diff = self._execute_for_link(source, dest_path)
             elif self._parsed_args[self.Args.TYPE] == self.TypeArg.COPY:
                 result, diff = self._execute_for_copy(source, source_content, dest_path)
@@ -431,8 +452,9 @@ class CreateAction(Action):
 
     def _populate_auto_args(self) -> None:
         if self._parsed_args[self.Args.SRC_TYPE] == self.SrcTypeArg.AUTO:
-            if (self._parsed_args[self.Args.SRC].startswith("http://")
-                    or self._parsed_args[self.Args.SRC].startswith("https://")):
+            if self._parsed_args[self.Args.SRC].startswith("http://") or self._parsed_args[
+                self.Args.SRC
+            ].startswith("https://"):
                 self._parsed_args[self.Args.SRC_TYPE] = self.SrcTypeArg.URL
             else:
                 self._parsed_args[self.Args.SRC_TYPE] = self.SrcTypeArg.PATH
@@ -443,18 +465,16 @@ class CreateAction(Action):
                 self._parsed_args[self.Args.TYPE] = self.TypeArg.LINK
 
     def _can_replace(self) -> bool:
-        return (
-            self._parsed_args[self.Args.REPLACE] == self.ForceArg.ALWAYS
-            or (self._parsed_args[self.Args.REPLACE] == self.ForceArg.ALLOW and self.force)
+        return self._parsed_args[self.Args.REPLACE] == self.ForceArg.ALWAYS or (
+            self._parsed_args[self.Args.REPLACE] == self.ForceArg.ALLOW and self.force
         )
 
     def _can_relink(self) -> bool:
-        return (
-            self._parsed_args[self.Args.RELINK] == self.ForceArg.ALWAYS
-            or (self._parsed_args[self.Args.RELINK] == self.ForceArg.ALLOW and self.force)
+        return self._parsed_args[self.Args.RELINK] == self.ForceArg.ALWAYS or (
+            self._parsed_args[self.Args.RELINK] == self.ForceArg.ALLOW and self.force
         )
 
-    def _update_permissions(self, file_path: str, mode: Optional[str]) -> bool:
+    def _update_permissions(self, file_path: str, mode: str | None) -> bool:
         """
         Update permissions of given file if needed and return whether
         any change was made.
@@ -512,12 +532,16 @@ class CreateAction(Action):
         try:
             os.unlink(link_path)
         except OSError as err:
-            raise self.CreateActionError(f"Failed to remove link: {link_path!r}: {err!s}") from err
+            raise self.CreateActionError(
+                f"Failed to remove link: {link_path!r}: {err!s}"
+            ) from err
 
     def _relink(self, source_path: str, dest_path: str, current_source_path: str) -> None:
         if not self._can_relink():
-            raise self.CreateActionError(f"Link exists with wrong source: {current_source_path!r} "
-                                         f"-> {dest_path!r} instead of {source_path!r}")
+            raise self.CreateActionError(
+                f"Link exists with wrong source: {current_source_path!r} "
+                f"-> {dest_path!r} instead of {source_path!r}"
+            )
         Print.v("Relinking to correct source...")
         if self.dry_run:
             return
@@ -544,7 +568,7 @@ class CreateAction(Action):
         if self._parsed_args[self.Args.BACKUP]:
             self._backup_file(dest_path)
         elif not self.dry_run:
-            # Backup will rename the file, so remove only if not backed up
+            # Backup will move or rename the file, so remove only if not backed up
             try:
                 os.remove(dest_path)
             except OSError as err:
@@ -560,7 +584,7 @@ class CreateAction(Action):
             else:
                 raise self.CreateActionError(f"Directory does not exist: {dest_path!r}")
 
-    def _execute_for_link(self, source_path: str, dest_path: str) -> Tuple[Result, Optional[str]]:
+    def _execute_for_link(self, source_path: str, dest_path: str) -> tuple[Result, str | None]:
         if os.path.exists(dest_path):
             if os.path.islink(dest_path):
                 link_source = os.readlink(dest_path)
@@ -588,8 +612,9 @@ class CreateAction(Action):
         self._create_link(source_path, dest_path)
         return self.Result.NEW_LINK_CREATED, diff
 
-    def _execute_for_copy(self, source_name: str, source_content: str,
-                          dest_path: str) -> Tuple[Result, Optional[str]]:
+    def _execute_for_copy(
+        self, source_name: str, source_content: str, dest_path: str
+    ) -> tuple[Result, str | None]:
         if os.path.exists(dest_path):
             if os.path.islink(dest_path):
                 diff = self._file_content_diff(source_name, source_content, dest_path)
@@ -627,9 +652,8 @@ class CreateAction(Action):
         """
         source_path = self._absolute_path(self._expanded_path(self._parsed_args[self.Args.SRC]))
         if not os.path.isfile(source_path):
-            source_path_text = (
-                repr(self._parsed_args[self.Args.SRC])
-                + (f" ({source_path!r})" if self._parsed_args[self.Args.SRC] != source_path else "")
+            source_path_text = repr(self._parsed_args[self.Args.SRC]) + (
+                f" ({source_path!r})" if self._parsed_args[self.Args.SRC] != source_path else ""
             )
             raise self.SourceDoesNotExist(f"Source file {source_path_text} not found.")
         return source_path
@@ -640,8 +664,10 @@ class CreateAction(Action):
             return self._absolute_path(expanded_path)
         if self._parsed_args[self.Args.DEST_TYPE] == self.DestTypeArg.GLOB_SINGLE:
             if set(os.path.basename(expanded_path)) & set("*?[]"):
-                raise self.CreateActionError(f"Glob patterns are not yet supported in the file "
-                                             f"name: {self._parsed_args[self.Args.DEST]!r}")
+                raise self.CreateActionError(
+                    "Glob patterns are not yet supported in the file "
+                    f"name: {self._parsed_args[self.Args.DEST]!r}"
+                )
             dest_dir_pattern = os.path.dirname(expanded_path)
             dest_dir_list = glob.glob(dest_dir_pattern)
             if len(dest_dir_list) == 0:
@@ -651,8 +677,9 @@ class CreateAction(Action):
                 )
             if len(dest_dir_list) > 1:
                 raise self.CreateActionError(
-                    f"Multiple matches for {self.Args.DEST_TYPE}='{self.DestTypeArg.GLOB_SINGLE}': "
-                    "{dest_dir_list!r} (dest: {self._parsed_args[self.Args.DEST]!r})"
+                    "Multiple matches for"
+                    f" {self.Args.DEST_TYPE}='{self.DestTypeArg.GLOB_SINGLE}':"
+                    " {dest_dir_list!r} (dest: {self._parsed_args[self.Args.DEST]!r})"
                 )
             dest_path = os.path.join(dest_dir_list[0], os.path.basename(expanded_path))
             return self._absolute_path(dest_path)
@@ -700,14 +727,14 @@ class FileContentAction(Action):
         },
     })
 
-    def _compile_regex(self, regex: str) -> re.Pattern:
+    def _compile_regex(self, regex: str) -> re.Pattern[str]:
         try:
             return re.compile(regex, flags=re.MULTILINE)
         except re.error as err:
             Print.v(f"Compiling regular expression {regex!r} failed with error: {err!s}")
             raise self.FileContentActionError("Invalid regular expression {regex!r}: {err!s}")
 
-    def execute(self) -> Tuple[str, Print.ANSI_COLOR, Optional[str]]:
+    def execute(self) -> tuple[str, Print.ANSI_COLOR, str | None]:
         dest_path = self._expanded_path(self._parsed_args[self.Args.DEST])
         if not os.path.exists(dest_path):
             raise self.FileContentActionError(f"Destination file does not exist: {dest_path}")
@@ -718,10 +745,11 @@ class FileContentAction(Action):
             file_content = fh.read()
 
         head, main_content = self._split_on_after_regex(file_content)
-        before_match, after_match, matched = \
-            self._split_around_content_match(main_content, dest_path)
+        before_match, after_match, matched = self._split_around_content_match(
+            main_content, dest_path
+        )
         new_content = head + before_match + self._parsed_args[self.Args.CONTENT] + after_match
-        diff: Optional[str] = None
+        diff: str | None = None
 
         if file_content != new_content:
             if self.show_diff:
@@ -737,15 +765,18 @@ class FileContentAction(Action):
                 with open(dest_path, "w") as fh:
                     fh.write(new_content)
 
-            message = (f"File content updated: {dest_path!r}" if matched
-                       else f"File content added: {dest_path!r}")
+            message = (
+                f"File content updated: {dest_path!r}"
+                if matched
+                else f"File content added: {dest_path!r}"
+            )
             color = Print.SUCCESS_COLOR
         else:
             message = f"File contents already as expected: {dest_path!r}"
             color = Print.AS_EXPECTED_COLOR
         return message, color, diff
 
-    def _split_on_after_regex(self, content: str) -> Tuple[str, str]:
+    def _split_on_after_regex(self, content: str) -> tuple[str, str]:
         if self._parsed_args[self.Args.AFTER] is None:
             return "", content
         after_regex = self._compile_regex(self._parsed_args[self.Args.AFTER])
@@ -755,8 +786,9 @@ class FileContentAction(Action):
         split_idx = after_matches[-1].end()
         return content[:split_idx], content[split_idx:]
 
-    def _split_around_content_match(self, initial_content: str,
-                                    dest_path: str) -> Tuple[str, str, bool]:
+    def _split_around_content_match(
+        self, initial_content: str, dest_path: str
+    ) -> tuple[str, str, bool]:
         if self._parsed_args[self.Args.REGEX] is not None:
             Print.vv(f"Using content regex: {self._parsed_args[self.Args.REGEX]}")
             content_regex = self._compile_regex(self._parsed_args[self.Args.REGEX])
@@ -774,16 +806,16 @@ class FileContentAction(Action):
         idx_start = initial_content.rfind(new_content)
         if idx_start == -1:
             return initial_content, "", False
-        return initial_content[:idx_start], initial_content[idx_start+len(new_content):], True
+        return initial_content[:idx_start], initial_content[idx_start + len(new_content) :], True
 
 
-ACTIONS_MAP: Dict[str, Type[Action]] = {
+ACTIONS_MAP: dict[str, type[Action]] = {
     "create": CreateAction,
     "filecontent": FileContentAction,
 }
 
 
-def parse_args(args_list: List[str]) -> argparse.Namespace:
+def parse_args(args_list: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--version",
@@ -807,7 +839,10 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
         "--config-file",
         "-c",
         nargs="?",
-        help=f"dotfiles yaml configuration file; default is {DEFAULT_CONFIG_NOTEXPANDED}",
+        help=(
+            f"dotfiles yaml configuration file; default is {DEFAULT_CONFIG_NOTEXPANDED} and can"
+            f" also be specified via environment variable {CONFIG_ENV_VAR}"
+        ),
     )
     parser.add_argument(
         "--color",
@@ -825,7 +860,7 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
         "--diff",
         "-d",
         action="store_true",
-        help="show the differences in changed files; works great with --dry-run"
+        help="show the differences in changed files; works great with --dry-run",
     )
     parser.add_argument(
         "--force",
@@ -839,18 +874,31 @@ def parse_args(args_list: List[str]) -> argparse.Namespace:
         help="allow execution as root",
     )
     parser.add_argument(
-        "--no-cache",
+        "--cache-timeout",
+        "-t",
+        type=int,
+        default=(os.getenv(CACHE_TIMEOUT_ENV_VAR, DEFAULT_REQUESTS_CACHE_TIMEOUT_MINUTES)),
+        help=(
+            "cache timeout in minutes, set to 0 to disable; default is"
+            f" {DEFAULT_REQUESTS_CACHE_TIMEOUT_MINUTES} and can also be set via environment"
+            f" variable {CACHE_TIMEOUT_ENV_VAR}"
+        ),
+    )
+    parser.add_argument(
+        "--local-backup",
         action="store_true",
-        help="disable request caching",
+        help="backup files locally instead of in ~/.cache/",
     )
     args = parser.parse_args(args_list)
     return args
 
 
 def get_config_file_path(args: argparse.Namespace) -> str:
-    args_config_file = cast(Optional[str], args.config_file)
-    for path, source in ((args_config_file, "command line arguments"),
-                         (os.environ.get(CONFIG_ENV_VAR), "environment variable")):
+    args_config_file = cast(str | None, args.config_file)
+    for path, source in (
+        (args_config_file, "command line arguments"),
+        (os.environ.get(CONFIG_ENV_VAR), "environment variable"),
+    ):
         if path:
             full_path = os.path.abspath(path)
             if not os.path.isfile(full_path):
@@ -874,17 +922,24 @@ def parse_yaml_file(fh: IO[str]) -> Any:
     try:
         result = yaml.safe_load(fh)
     except yaml.YAMLError as exc:
-        Print.failure(f"Error while parsing yaml configuration file {fh.name}:\n{exc}",
-                      file=sys.stderr)
+        Print.failure(
+            f"Error while parsing yaml configuration file {fh.name}:\n{exc}", file=sys.stderr
+        )
         sys.exit(1)
     return result
 
 
-def _parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
-                         show_diff: bool = False, force: bool = False) -> List[Action]:
+def _parse_configuraiton(
+    config: Any,
+    local_dir: str,
+    dry_run: bool = False,
+    show_diff: bool = False,
+    force: bool = False,
+    local_backup: bool = False,
+) -> list[Action]:
     if not isinstance(config, list):
         raise ConfigFileError("Invalid configuraiton file format: expected list of actions")
-    actions: List[Action] = []
+    actions: list[Action] = []
     for action_dict in config:
         if len(action_dict) != 1:
             raise ConfigFileError(f"Single action name expected, got: {list(action_dict.keys())}")
@@ -892,18 +947,36 @@ def _parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
         if action_name not in ACTIONS_MAP:
             raise ConfigFileError(f"Invalid action: {action_name}")
         for action_args in action_args_list:
-            action = ACTIONS_MAP[action_name](action_args, local_dir=local_dir, dry_run=dry_run,
-                                              show_diff=show_diff, force=force)
+            action = ACTIONS_MAP[action_name](
+                action_args,
+                local_dir=local_dir,
+                dry_run=dry_run,
+                show_diff=show_diff,
+                force=force,
+                local_backup=local_backup,
+            )
             actions.append(action)
 
     return actions
 
 
-def parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
-                        show_diff: bool = False, force: bool = False) -> List[Action]:
+def parse_configuraiton(
+    config: Any,
+    local_dir: str,
+    dry_run: bool = False,
+    show_diff: bool = False,
+    force: bool = False,
+    local_backup: bool = False,
+) -> list[Action]:
     try:
-        return _parse_configuraiton(config, local_dir, dry_run=dry_run, show_diff=show_diff,
-                                    force=force)
+        return _parse_configuraiton(
+            config,
+            local_dir,
+            dry_run=dry_run,
+            show_diff=show_diff,
+            force=force,
+            local_backup=local_backup,
+        )
     except (ConfigFileError, ArgsDefinition.InvalidArguments) as e:
         Print.failure(f"Configuration file error: {e}")
         sys.exit(1)
@@ -912,13 +985,19 @@ def parse_configuraiton(config: Any, local_dir: str, dry_run: bool = False,
 def execute_dotfilelink_with_sudo(config_path: str) -> int:
     colors = "always" if Print.COLORS_ENABLED else "never"
     command = [
-        "sudo", sys.executable, __file__,
+        "sudo",
+        sys.executable,
+        __file__,
         *sys.argv[1:],
-        "--color", colors,
-        "--config-file", config_path,
+        "--color",
+        colors,
+        "--config-file",
+        config_path,
         "--sudo-only",
     ]
-    process = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(
+        command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
     assert process.stdout is not None and process.stderr is not None
 
     return_code = None
@@ -935,13 +1014,14 @@ def execute_dotfilelink_with_sudo(config_path: str) -> int:
 
 
 def _enable_cache(timeout_minutes: int) -> None:
+    Print.v(f"Enabling request cache with {timeout_minutes} minute timeout.")
     requests_cache.install_cache(
-        cache_name='dotfilelink_cache',
+        cache_name="dotfilelink_cache",
         expire_after=timedelta(minutes=timeout_minutes),
         use_cache_dir=True,
         cache_control=False,
         allowable_codes=[200],
-        allowable_methods=['GET'],
+        allowable_methods=["GET"],
         stale_if_error=False,
     )
 
@@ -960,8 +1040,8 @@ def main() -> None:
         Print.info(f"dotfilelink v{__version__}")
         sys.exit(0)
 
-    if not args.no_cache:
-        _enable_cache(REQUESTS_CACHE_TIMEOUT_MINUTES)
+    if args.cache_timeout != 0:
+        _enable_cache(args.cache_timeout)
 
     am_root = os.geteuid() == 0
     if args.sudo_only and not am_root:
@@ -971,17 +1051,29 @@ def main() -> None:
         if args.allow_root:
             Print.info("Warning: running as root")
         else:
-            Print.info("Warning: Running dotfilelinks with sudo can result in files with "
-                       "incorrect permissions or paths. Use --allow-root if you are sure.")
+            Print.info(
+                "Warning: Running dotfilelinks with sudo can result in files with "
+                "incorrect permissions or paths. Use --allow-root if you are sure."
+            )
             sys.exit(2)
+
+    if not args.local_backup and not os.path.isdir(BACKUPS_BASE_DIR):
+        Print.v(f"Creating backups directory: {BACKUPS_BASE_DIR}")
+        os.makedirs(BACKUPS_BASE_DIR)
 
     config_file_path = get_config_file_path(args)
     with open(config_file_path, "r") as fh:
         config = parse_yaml_file(fh)
     # Use the configuration file local directory when resolving paths
     config_local_dir = os.path.dirname(config_file_path)
-    actions = parse_configuraiton(config, local_dir=config_local_dir, dry_run=args.dry_run,
-                                  show_diff=args.diff, force=args.force)
+    actions = parse_configuraiton(
+        config,
+        local_dir=config_local_dir,
+        dry_run=args.dry_run,
+        show_diff=args.diff,
+        force=args.force,
+        local_backup=args.local_backup,
+    )
     non_sudo_actions = [action for action in actions if not action.sudo]
     sudo_actions = [action for action in actions if action.sudo]
 
@@ -991,8 +1083,10 @@ def main() -> None:
     else:
         # If we are root execute all actions like normal
         actions_list = actions if am_root else non_sudo_actions
-        Print.v(f"Executing {len(actions)} actions, sudo: {len(sudo_actions)}, "
-                f"non-sudo: {len(non_sudo_actions)}.")
+        Print.v(
+            f"Executing {len(actions)} actions, sudo: {len(sudo_actions)}, "
+            f"non-sudo: {len(non_sudo_actions)}."
+        )
 
     initial_task_number = 1
     success = True
