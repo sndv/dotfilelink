@@ -1,20 +1,20 @@
 # Dotfilelink
 
-A simple tool for installing dotfiles that supports changes to files requiring
+A simple tool for installing dotfiles. Supports changes to files requiring
 root access.
 
 ## Install
 
-With pipx:
+With uv/uvx:
+
+```sh
+uv tool install git+https://github.com/sndv/dotfilelink
+```
+
+Or with pip/pipx:
 
 ```sh
 pipx install git+https://github.com/sndv/dotfilelink
-```
-
-Or with pip:
-
-```sh
-pip install git+https://github.com/sndv/dotfilelink
 ```
 
 ## Usage
