@@ -23,7 +23,10 @@ dotfilelink = "dotfilelink.dotfilelink:main"
 
 [dependency-groups]
 dev = [
+    "mypy>=1.15.0",
     "ruff>=0.11.11",
+    "types-pyyaml>=6.0.12.20250516",
+    "types-requests>=2.32.0.20250515",
 ]
 
 [tool.ruff]
@@ -51,3 +54,10 @@ select = [
     "PLW", # pylint warning
     "RUF", # ruff-specific rules
 ]
+
+[tool.mypy]
+python_version = 3.12
+strict = true
+warn_no_return = true
+warn_unreachable = true
+strict_bytes = true
