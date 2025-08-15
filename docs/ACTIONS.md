@@ -24,7 +24,7 @@ Destination path.
 ### `create_dirs` | boolean
 
 If one or more of the directories in the `dest` path do not exist,
-create them.
+create them. Default: `true`.
 
 ### `src_type` | choice
 

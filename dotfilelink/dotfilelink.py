@@ -414,7 +414,7 @@ class CreateAction(Action):
         Args.CREATE_DIRS: {
             "type": bool,
             "required": False,
-            "default": False,
+            "default": True,
         },
         Args.SRC_TYPE: {
             "type": str,
