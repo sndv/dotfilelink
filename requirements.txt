@@ -1,3 +1,0 @@
-pyyaml
-requests
-requests-cache

@@ -4,6 +4,7 @@ import argparse
 import difflib
 import glob
 import hashlib
+import importlib.metadata
 import os
 import re
 import subprocess
@@ -16,13 +17,11 @@ import requests
 import requests_cache
 import yaml
 
-__version__ = "0.4.0"
-
-
+VERSION = importlib.metadata.version("dotfilelink")
 DEFAULT_CONFIG_NOTEXPANDED = "~/dotfiles/config.yml"
 DEFAULT_CONFIG = os.path.expanduser(DEFAULT_CONFIG_NOTEXPANDED)
 ALTERNATIVE_CONFIG = os.path.expanduser("~/dotfiles/config.yaml")
-DEFAULT_REQUESTS_CACHE_TIMEOUT_MINUTES = 10
+DEFAULT_REQUESTS_CACHE_TIMEOUT_MINUTES = 60
 CONFIG_ENV_VAR = "DOTFILELINK_CONFIG"
 CACHE_TIMEOUT_ENV_VAR = "DOTFILELINK_CACHE_TIMEOUT"
 BACKUPS_BASE_DIR = os.path.expanduser("~/.cache/dotfilelink/")
@@ -61,6 +60,7 @@ class Print:
     SUCCESS_COLOR = ANSI_COLOR.GREEN
     AS_EXPECTED_COLOR = ANSI_COLOR.BLUE
     FAILURE_COLOR = ANSI_COLOR.RED
+    WARNING_COLOR = ANSI_COLOR.YELLOW
 
     @classmethod
     def print_(cls, *args: Any, **kwargs: Any) -> None:
@@ -72,6 +72,10 @@ class Print:
     def info(cls, *args: Any, **kwargs: Any) -> None:
         if cls.VERBOSITY_LEVEL >= 0:
             cls.print_(*args, **kwargs)
+
+    @classmethod
+    def warning(cls, msg: str, **kwargs: Any) -> None:
+        cls.color(msg, color=cls.WARNING_COLOR, **kwargs)
 
     @classmethod
     def v(cls, *args: Any, **kwargs: Any) -> None:
@@ -222,12 +226,49 @@ class Action:
         """
         raise NotImplementedError("Abstract method")
 
+    def _diff(self, src_path: str, dest_path: str) -> str | None:
+        if os.path.isfile(src_path):
+            if os.path.isdir(dest_path):
+                return self._mixed_file_dir_diff(src_path, dest_path)
+            if os.path.isfile(dest_path) or not os.path.exists(dest_path):
+                return self._file_diff(src_path, dest_path)
+            raise RuntimeError("unreachable")
+        if os.path.isdir(src_path):
+            if os.path.isfile(dest_path):
+                return self._mixed_file_dir_diff(src_path, dest_path)
+            if os.path.isdir(dest_path) or not os.path.exists(dest_path):
+                return self._dir_diff(src_path, dest_path)
+        raise RuntimeError("unreachable")
+
     def _file_diff(self, src_path: str, dest_path: str) -> str | None:
         if not self.show_diff:
             return None
-        with open(src_path, "r") as fd:
+        with open(src_path) as fd:
             src_content = fd.read()
         return self._file_content_diff(src_path, src_content, dest_path)
+
+    def _dir_diff(self, src_path: str, dest_path: str) -> str | None:
+        def dir_tree(root_dir: str, prefix: str = "") -> list[str]:
+            tree: list[str] = []
+            entries = sorted(os.listdir(root_dir))
+            for index, entry in enumerate(entries):
+                path = os.path.join(root_dir, entry)
+                connector = "└── " if index + 1 == len(entries) else "├── "
+                tree.append(prefix + connector + entry + "\n")
+                if os.path.isdir(path):
+                    extension = "    " if index + 1 == len(entries) else "│   "
+                    tree.extend(dir_tree(path, prefix + extension))
+            return tree
+
+        src_lines = [f"{os.path.basename(src_path)}/\n", *dir_tree(src_path)]
+        dest_lines = []
+        if os.path.exists(dest_path):
+            dest_lines = [f"{os.path.basename(dest_path)}/\n", *dir_tree(dest_path)]
+        return self._lines_diff(dest_lines, src_lines, dest_path, src_path)
+
+    def _mixed_file_dir_diff(self, src_path: str, dest_path: str) -> str | None:
+        Print.warning("No diff between file and directory: not yet implemented")
+        return None
 
     def _file_content_diff(self, src_name: str, src_content: str, dest_path: str) -> str | None:
         if not self.show_diff:
@@ -236,7 +277,7 @@ class Action:
         src_lines = src_content.splitlines(keepends=True)
         dest_lines = []
         if os.path.exists(dest_path):
-            with open(dest_path, "r") as fd:
+            with open(dest_path) as fd:
                 dest_lines = fd.read().splitlines(keepends=True)
         return self._lines_diff(dest_lines, src_lines, dest_path, src_name)
 
@@ -281,7 +322,7 @@ class Action:
     def _get_from_url(self, url: str) -> str:
         resp = requests.get(url)
         if resp.status_code != 200:
-            raise self.ActionError(f"GET request failed for: {url!r}")
+            raise self.ActionError(f"GET request failed (got {resp.status_code}) for: {url!r}")
         return resp.text
 
 
@@ -373,7 +414,7 @@ class CreateAction(Action):
         Args.CREATE_DIRS: {
             "type": bool,
             "required": False,
-            "default": False,
+            "default": True,
         },
         Args.SRC_TYPE: {
             "type": str,
@@ -429,20 +470,22 @@ class CreateAction(Action):
                 raise RuntimeError("Unreachable")
         elif self._parsed_args[self.Args.SRC_TYPE] == self.SrcTypeArg.PATH:
             source = self._source_path()
-            with open(source, "r") as fh:
-                source_content = fh.read()
             Print.v(
                 f"Creating {self._parsed_args[self.Args.TYPE]} of {source} "
                 f"at {self._parsed_args[self.Args.DEST]}"
             )
             if self._parsed_args[self.Args.TYPE] == self.TypeArg.LINK:
                 if self.sudo:
-                    Print.info(
-                        f"Warning: sudo option used with symlink, "
-                        f"this is not recommended for security reasons"
+                    Print.warning(
+                        "Warning: sudo option used with symlink, "
+                        "this is not recommended for security reasons"
                     )
                 result, diff = self._execute_for_link(source, dest_path)
             elif self._parsed_args[self.Args.TYPE] == self.TypeArg.COPY:
+                if os.path.isdir(source):
+                    raise self.CreateActionError(f"Copy of directory not yet supported: {source}")
+                with open(source) as fh:
+                    source_content = fh.read()
                 result, diff = self._execute_for_copy(source, source_content, dest_path)
             else:
                 raise RuntimeError("Unreachable")
@@ -543,8 +586,6 @@ class CreateAction(Action):
                 f"-> {dest_path!r} instead of {source_path!r}"
             )
         Print.v("Relinking to correct source...")
-        if self.dry_run:
-            return
         self._unlink(dest_path)
         self._create_link(source_path, dest_path)
 
@@ -554,8 +595,6 @@ class CreateAction(Action):
                 f"Can't create copy, destination exists as link: {dest_path!r}"
             )
         Print.v("Replacing link with file...")
-        if self.dry_run:
-            return
         self._unlink(dest_path)
         self._create_copy(source_name, source_content, dest_path)
 
@@ -591,18 +630,19 @@ class CreateAction(Action):
                 if link_source == source_path:
                     Print.v("Correct link already exists.")
                     return self.Result.LINK_AS_EXPECTED, None
-                diff = self._file_diff(source_path, dest_path)
+                diff = self._diff(source_path, dest_path)
                 self._relink(source_path, dest_path, link_source)
                 return self.Result.RELINKED, diff
             if os.path.isfile(dest_path):
-                diff = self._file_diff(source_path, dest_path)
+                diff = self._diff(source_path, dest_path)
                 self._prepare_replace_file(dest_path)
                 self._create_link(source_path, dest_path)
                 return self.Result.REPLACED_FILE_WITH_LINK, diff
+            # TODO: support for directory replacement with force?
             raise self.CreateActionError(
                 f"Destination exists but it's not a file or link, not replacing: {dest_path!r}"
             )
-        diff = self._file_diff(source_path, dest_path)
+        diff = self._diff(source_path, dest_path)
         if os.path.islink(dest_path):  # Broken link
             link_source = os.readlink(dest_path)
             Print.v(f"Found broken link {link_source!r} -> {dest_path!r}")
@@ -651,12 +691,12 @@ class CreateAction(Action):
         Ensure that the source file exists and return its absolute path.
         """
         source_path = self._absolute_path(self._expanded_path(self._parsed_args[self.Args.SRC]))
-        if not os.path.isfile(source_path):
-            source_path_text = repr(self._parsed_args[self.Args.SRC]) + (
-                f" ({source_path!r})" if self._parsed_args[self.Args.SRC] != source_path else ""
-            )
-            raise self.SourceDoesNotExist(f"Source file {source_path_text} not found.")
-        return source_path
+        if os.path.isfile(source_path) or os.path.isdir(source_path):
+            return source_path
+        source_path_text = repr(self._parsed_args[self.Args.SRC]) + (
+            f" ({source_path!r})" if self._parsed_args[self.Args.SRC] != source_path else ""
+        )
+        raise self.SourceDoesNotExist(f"Source file or directory {source_path_text} not found.")
 
     def _dest_path(self) -> str:
         expanded_path = self._expanded_path(self._parsed_args[self.Args.DEST])
@@ -732,7 +772,9 @@ class FileContentAction(Action):
             return re.compile(regex, flags=re.MULTILINE)
         except re.error as err:
             Print.v(f"Compiling regular expression {regex!r} failed with error: {err!s}")
-            raise self.FileContentActionError("Invalid regular expression {regex!r}: {err!s}")
+            raise self.FileContentActionError(
+                "Invalid regular expression {regex!r}: {err!s}"
+            ) from err
 
     def execute(self) -> tuple[str, Print.ANSI_COLOR, str | None]:
         dest_path = self._expanded_path(self._parsed_args[self.Args.DEST])
@@ -741,7 +783,7 @@ class FileContentAction(Action):
         if not os.path.isfile(dest_path):
             raise self.FileContentActionError(f"Destination path is not a file: {dest_path}")
 
-        with open(dest_path, "r") as fh:
+        with open(dest_path) as fh:
             file_content = fh.read()
 
         head, main_content = self._split_on_after_regex(file_content)
@@ -943,7 +985,7 @@ def _parse_configuraiton(
     for action_dict in config:
         if len(action_dict) != 1:
             raise ConfigFileError(f"Single action name expected, got: {list(action_dict.keys())}")
-        action_name, action_args_list = list(action_dict.items())[0]
+        action_name, action_args_list = next(iter(action_dict.items()))
         if action_name not in ACTIONS_MAP:
             raise ConfigFileError(f"Invalid action: {action_name}")
         for action_args in action_args_list:
@@ -982,7 +1024,11 @@ def parse_configuraiton(
         sys.exit(1)
 
 
-def execute_dotfilelink_with_sudo(config_path: str) -> int:
+# Marks the line the sudo child uses to send its counts back to the parent.
+SUDO_COUNTS_TAG = "__dotfilelink_counts__"
+
+
+def execute_dotfilelink_with_sudo(config_path: str) -> tuple[int, list[int]]:
     colors = "always" if Print.COLORS_ENABLED else "never"
     command = [
         "sudo",
@@ -1001,16 +1047,21 @@ def execute_dotfilelink_with_sudo(config_path: str) -> int:
     assert process.stdout is not None and process.stderr is not None
 
     return_code = None
+    counts = [0, 0, 0]
     while True:
         return_code = process.poll()
         while stdout_line := process.stdout.readline():
-            Print.print_(stdout_line.decode(), end="")
+            line = stdout_line.decode()
+            if line.startswith(SUDO_COUNTS_TAG):
+                counts = [int(n) for n in line.split()[1:]]
+                continue
+            Print.print_(line, end="")
         while stderr_line := process.stderr.readline():
             Print.print_(stderr_line.decode(), end="", file=sys.stderr)
         if return_code is not None:
             break
 
-    return return_code
+    return return_code, counts
 
 
 def _enable_cache(timeout_minutes: int) -> None:
@@ -1037,7 +1088,7 @@ def main() -> None:
         Print.COLORS_ENABLED = False
 
     if args.version:
-        Print.info(f"dotfilelink v{__version__}")
+        Print.info(f"dotfilelink v{VERSION}")
         sys.exit(0)
 
     if args.cache_timeout != 0:
@@ -1062,7 +1113,7 @@ def main() -> None:
         os.makedirs(BACKUPS_BASE_DIR)
 
     config_file_path = get_config_file_path(args)
-    with open(config_file_path, "r") as fh:
+    with open(config_file_path) as fh:
         config = parse_yaml_file(fh)
     # Use the configuration file local directory when resolving paths
     config_local_dir = os.path.dirname(config_file_path)
@@ -1090,10 +1141,14 @@ def main() -> None:
 
     initial_task_number = 1
     success = True
+    expected_count = 0
+    changed_count = 0
+    failed_count = 0
 
     if not args.sudo_only and not am_root and sudo_actions:
         Print.vv("Starting new process for sudo actions")
-        return_code = execute_dotfilelink_with_sudo(config_file_path)
+        return_code, counts = execute_dotfilelink_with_sudo(config_file_path)
+        expected_count, changed_count, failed_count = counts
         success = return_code == 0
         initial_task_number = len(sudo_actions) + 1
 
@@ -1105,10 +1160,31 @@ def main() -> None:
         except Action.ActionError as err:
             Print.failure(f"[{task_number}/{len(actions)}] {err!s}{sudo_msg}")
             success = False
+            failed_count += 1
         else:
             Print.color(f"[{task_number}/{len(actions)}] {message}{sudo_msg}", color)
+            if color == Print.AS_EXPECTED_COLOR:
+                expected_count += 1
+            else:
+                changed_count += 1
             if diff:
                 Print.file_diff(diff)
+
+    if args.sudo_only:
+        # The parent process prints the summary for both runs.
+        Print.print_(f"{SUDO_COUNTS_TAG} {expected_count} {changed_count} {failed_count}")
+    elif Print.VERBOSITY_LEVEL >= 0:
+        if failed_count:
+            summary_color = Print.FAILURE_COLOR
+        elif changed_count:
+            summary_color = Print.SUCCESS_COLOR
+        else:
+            summary_color = Print.AS_EXPECTED_COLOR
+        Print.color(
+            f"Summary: {expected_count} unchanged, {changed_count} changed,"
+            f" {failed_count} failed",
+            summary_color,
+        )
 
     if not success:
         sys.exit(1)

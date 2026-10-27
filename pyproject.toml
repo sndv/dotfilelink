@@ -1,8 +1,63 @@
-[tool.black]
-line-length = 98
-target-version = ["py310"]
-preview = true
-unstable = true
+[project]
+name = "dotfilelink"
+version = "0.4.3"
+description = "A tool for installing dotfiles"
+authors = [{ name = "sndv", email = "sndv@mailbox.org" }]
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0.2",
+    "requests>=2.32.3",
+    "requests-cache>=1.2.1",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
 
-[tool.isort]
-profile = "black"
+[project.urls]
+Homepage = "https://github.com/sndv/dotfilelink"
+
+[project.scripts]
+dotfilelink = "dotfilelink.dotfilelink:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "ruff>=0.11.11",
+    "types-pyyaml>=6.0.12.20250516",
+    "types-requests>=2.32.0.20250515",
+]
+
+[tool.ruff]
+line-length = 98
+
+[tool.ruff.format]
+preview = true
+quote-style = "double"
+line-ending = "lf"
+
+[tool.ruff.lint]
+select = [
+    "E", # pycodestyle errors
+    "W", # pycodestyle warnings
+    "F", # pyflakes
+    "UP", # pyupgrade
+    "B", # flake8-bugbear
+    "SIM", # flake8-simplify
+    "I", # isort
+    # "ANN", # flake8-annotations
+    # "PTH", # flake8-use-pathlib
+    # "N", # pep8-naming
+    "PLC", # pylint convention
+    "PLE", # pylint error
+    "PLW", # pylint warning
+    "RUF", # ruff-specific rules
+]
+
+[tool.mypy]
+python_version = 3.12
+strict = true
+warn_no_return = true
+warn_unreachable = true
+strict_bytes = true
