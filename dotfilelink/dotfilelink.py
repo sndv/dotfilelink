@@ -1024,7 +1024,11 @@ def parse_configuraiton(
         sys.exit(1)
 
 
-def execute_dotfilelink_with_sudo(config_path: str) -> int:
+# Marks the line the sudo child uses to send its counts back to the parent.
+SUDO_COUNTS_TAG = "__dotfilelink_counts__"
+
+
+def execute_dotfilelink_with_sudo(config_path: str) -> tuple[int, list[int]]:
     colors = "always" if Print.COLORS_ENABLED else "never"
     command = [
         "sudo",
@@ -1043,16 +1047,21 @@ def execute_dotfilelink_with_sudo(config_path: str) -> int:
     assert process.stdout is not None and process.stderr is not None
 
     return_code = None
+    counts = [0, 0, 0]
     while True:
         return_code = process.poll()
         while stdout_line := process.stdout.readline():
-            Print.print_(stdout_line.decode(), end="")
+            line = stdout_line.decode()
+            if line.startswith(SUDO_COUNTS_TAG):
+                counts = [int(n) for n in line.split()[1:]]
+                continue
+            Print.print_(line, end="")
         while stderr_line := process.stderr.readline():
             Print.print_(stderr_line.decode(), end="", file=sys.stderr)
         if return_code is not None:
             break
 
-    return return_code
+    return return_code, counts
 
 
 def _enable_cache(timeout_minutes: int) -> None:
@@ -1132,10 +1141,14 @@ def main() -> None:
 
     initial_task_number = 1
     success = True
+    expected_count = 0
+    changed_count = 0
+    failed_count = 0
 
     if not args.sudo_only and not am_root and sudo_actions:
         Print.vv("Starting new process for sudo actions")
-        return_code = execute_dotfilelink_with_sudo(config_file_path)
+        return_code, counts = execute_dotfilelink_with_sudo(config_file_path)
+        expected_count, changed_count, failed_count = counts
         success = return_code == 0
         initial_task_number = len(sudo_actions) + 1
 
@@ -1147,10 +1160,31 @@ def main() -> None:
         except Action.ActionError as err:
             Print.failure(f"[{task_number}/{len(actions)}] {err!s}{sudo_msg}")
             success = False
+            failed_count += 1
         else:
             Print.color(f"[{task_number}/{len(actions)}] {message}{sudo_msg}", color)
+            if color == Print.AS_EXPECTED_COLOR:
+                expected_count += 1
+            else:
+                changed_count += 1
             if diff:
                 Print.file_diff(diff)
+
+    if args.sudo_only:
+        # The parent process prints the summary for both runs.
+        Print.print_(f"{SUDO_COUNTS_TAG} {expected_count} {changed_count} {failed_count}")
+    elif Print.VERBOSITY_LEVEL >= 0:
+        if failed_count:
+            summary_color = Print.FAILURE_COLOR
+        elif changed_count:
+            summary_color = Print.SUCCESS_COLOR
+        else:
+            summary_color = Print.AS_EXPECTED_COLOR
+        Print.color(
+            f"Summary: {expected_count} unchanged, {changed_count} changed,"
+            f" {failed_count} failed",
+            summary_color,
+        )
 
     if not success:
         sys.exit(1)
